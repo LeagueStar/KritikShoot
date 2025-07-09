@@ -3,27 +3,254 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>KritikShoot</title>
+  <title>KritikShoot - Survival Shooter Game</title>
   <link rel="stylesheet" href="./style.css">
+  <style>
+    /* Basic reset and global styles */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Arial', sans-serif;
+      overflow: hidden;
+      touch-action: none;
+      background-color: #000;
+    }
+    
+    /* Start screen styles */
+    #startScreen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+      color: white;
+      text-align: center;
+    }
+    
+    #startScreen h1 {
+      font-size: 3rem;
+      margin-bottom: 1.5rem;
+      color: #4CAF50;
+      text-shadow: 0 0 10px rgba(76, 175, 80, 0.7);
+    }
+    
+    #nicknameInput {
+      padding: 12px 20px;
+      font-size: 1.1rem;
+      text-align: center;
+      border: 2px solid #4CAF50;
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.1);
+      color: white;
+      margin: 20px 0;
+      width: 80%;
+      max-width: 300px;
+    }
+    
+    #startBtn {
+      padding: 15px 30px;
+      font-size: 1.2rem;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.3s;
+      font-weight: bold;
+      margin: 10px 0;
+    }
+    
+    #startBtn:hover, #startBtn:focus {
+      background: #45a049;
+      transform: scale(1.05);
+      box-shadow: 0 0 15px rgba(76, 175, 80, 0.7);
+    }
+    
+    /* Game canvas */
+    #gameCanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      background-color: #111;
+    }
+    
+    /* Mobile controls */
+    #mobileControls {
+      display: none;
+      position: fixed;
+      bottom: 20px;
+      width: 100%;
+      justify-content: space-between;
+      padding: 0 20px;
+      z-index: 50;
+    }
+    
+    .joystick {
+      width: 80px;
+      height: 80px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 50%;
+      position: relative;
+      touch-action: none;
+    }
+    
+    .shoot-btn {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: rgba(255, 0, 0, 0.5);
+      border: none;
+      color: white;
+      font-weight: bold;
+      font-size: 1rem;
+      cursor: pointer;
+      touch-action: none;
+    }
+    
+    /* Level up screen */
+    #levelUpScreen {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.8);
+      padding: 2rem;
+      border-radius: 10px;
+      z-index: 90;
+      color: white;
+      text-align: center;
+      max-width: 90%;
+      width: 400px;
+    }
+    
+    #levelUpScreen h2 {
+      margin-bottom: 1.5rem;
+      color: #4CAF50;
+    }
+    
+    #levelUpScreen button {
+      display: block;
+      width: 100%;
+      padding: 12px;
+      margin: 10px 0;
+      background: #333;
+      color: white;
+      border: 1px solid #4CAF50;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    #levelUpScreen button:hover {
+      background: #4CAF50;
+    }
+    
+    /* Restart button */
+    #restartBtn {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 15px 30px;
+      background: #f44336;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      z-index: 80;
+      font-weight: bold;
+      display: none;
+    }
+    
+    #restartBtn:hover {
+      background: #d32f2f;
+    }
+    
+    /* Leaderboard */
+    #localLeaderboard {
+      margin-top: 2rem;
+      width: 90%;
+      max-width: 500px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 1rem;
+      border-radius: 5px;
+    }
+    
+    #localLeaderboard h3 {
+      color: #4CAF50;
+      margin-bottom: 0.5rem;
+    }
+    
+    #localLeaderboard table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    
+    #localLeaderboard th, #localLeaderboard td {
+      padding: 8px;
+      text-align: left;
+      border-bottom: 1px solid #444;
+    }
+    
+    #localLeaderboard th {
+      color: #4CAF50;
+    }
+    
+    @media (max-width: 768px) {
+      #startScreen h1 {
+        font-size: 2rem;
+      }
+      
+      #mobileControls {
+        display: flex;
+      }
+    }
+  </style>
 </head>
 <body>
-  <canvas id="gameCanvas"></canvas>
-  
-  <div id="mobileControls" style="display:none;">
-    <div id="joystick" class="joystick"></div>
-    <button id="shootBtn" class="shoot-btn">SHOOT</button>
+  <!-- Start Screen -->
+  <div id="startScreen">
+    <h1>KritikShoot</h1>
+    <div>
+      <input type="text" id="nicknameInput" placeholder="Enter nickname" maxlength="15" aria-label="Enter your nickname">
+    </div>
+    <button id="startBtn" aria-label="Start game">START GAME</button>
+    <div id="localLeaderboard"></div>
   </div>
-  
-  <div id="levelUpScreen" style="display:none;">
+
+  <!-- Game Canvas -->
+  <canvas id="gameCanvas" tabindex="0" aria-label="Game canvas"></canvas>
+
+  <!-- Mobile Controls (shown only on mobile devices) -->
+  <div id="mobileControls">
+    <div id="joystick" class="joystick" aria-label="Movement joystick"></div>
+    <button id="shootBtn" class="shoot-btn" aria-label="Shoot button">SHOOT</button>
+  </div>
+
+  <!-- Level Up Screen -->
+  <div id="levelUpScreen">
     <h2>Level Up!</h2>
+    <p>Choose your upgrade:</p>
     <button id="upgradeSpeed">+ Speed</button>
     <button id="upgradeHealth">+ Max Health</button>
     <button id="upgradeDamage">+ Damage</button>
     <button id="upgradeFireRate">+ Fire Rate</button>
   </div>
-  
-  <button id="restartBtn" style="display:none;">Restart</button>
-  
+
+  <!-- Restart Button -->
+  <button id="restartBtn">Restart</button>
+
   <script src="./game.js" defer></script>
 </body>
 </html>
