@@ -6,9 +6,71 @@ const restartBtn = document.getElementById('restartBtn');
 const mobileControls = document.getElementById('mobileControls');
 const joystick = document.getElementById('joystick');
 const shootBtn = document.getElementById('shootBtn');
+const startBtn = document.getElementById('startBtn');
+const nicknameInput = document.getElementById('nicknameInput');
+const levelUpScreen = document.getElementById('levelUpScreen');
 
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+// Leaderboard
+const leaderboard = {
+  maxEntries: 10,
+  scores: JSON.parse(localStorage.getItem('leaderboard')) || [],
+  
+  addScore: function(nickname, wave, time, level) {
+    this.scores.push({
+      nickname,
+      wave,
+      time,
+      level,
+      date: new Date().toLocaleDateString()
+    });
+    
+    // Sort by wave then time
+    this.scores.sort((a, b) => b.wave - a.wave || b.time - a.time);
+    
+    // Keep only top scores
+    if (this.scores.length > this.maxEntries) {
+      this.scores = this.scores.slice(0, this.maxEntries);
+    }
+    
+    localStorage.setItem('leaderboard', JSON.stringify(this.scores));
+    this.display();
+  },
+  
+  display: function(elementId = 'localLeaderboard') {
+    const container = document.getElementById(elementId);
+    if (!container) return;
+    
+    if (this.scores.length === 0) {
+      container.innerHTML = '<h3>No scores yet!</h3>';
+      return;
+    }
+    
+    let html = '<h3>Leaderboard</h3><table style="width:100%; border-collapse:collapse;">';
+    html += '<tr><th>Rank</th><th>Name</th><th>Wave</th><th>Time</th></tr>';
+    
+    this.scores.forEach((score, index) => {
+      html += `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${score.nickname || 'Anonymous'}</td>
+          <td>${score.wave}</td>
+          <td>${score.time.toFixed(1)}s</td>
+        </tr>
+      `;
+    });
+    
+    html += '</table>';
+    container.innerHTML = html;
+  }
+};
+
+// Resize canvas to fit window
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
 
 // Game state variables
 let isPaused = false;
@@ -24,6 +86,25 @@ let kills = 0;
 let waveCount = 1;
 let gameTime = 0;
 let isMobile = false;
+let particles = [];
+let cameraShake = 0;
+const MAX_SHAKE = 10;
+
+const POWERUP_TYPES = {
+  HEALTH: 'health',
+  XP: 'xp',
+  SHIELD: 'shield',
+  TRIPLE_SHOT: 'triple_shot',
+  SPEED_BOOST: 'speed_boost',
+  RAGE: 'rage'
+};
+
+const activePowerups = {
+  shield: { active: false, endTime: 0 },
+  tripleShot: { active: false, endTime: 0 },
+  speedBoost: { active: false, endTime: 0 },
+  rage: { active: false, endTime: 0 }
+};
 
 // Player progression
 const playerStats = {
@@ -34,7 +115,10 @@ const playerStats = {
     speed: 0,
     health: 0,
     damage: 0,
-    fireRate: 0
+    fireRate: 0,
+    bulletSpeed: 0,
+    critChance: 0,
+    lifesteal: 0
   }
 };
 
@@ -45,7 +129,11 @@ const player = {
   size: 20,
   color: 'white',
   baseSpeed: 5,
-  get speed() { return this.baseSpeed + playerStats.upgrades.speed * 0.5; },
+  get speed() { 
+    return this.baseSpeed + 
+           playerStats.upgrades.speed * 0.5 + 
+           (activePowerups.speedBoost.active ? 3 : 0); 
+  },
   health: 200,
   baseMaxHealth: 200,
   get maxHealth() { return this.baseMaxHealth + playerStats.upgrades.health * 20; },
@@ -54,28 +142,21 @@ const player = {
   baseShootDelay: 200,
   get shootDelay() { return this.baseShootDelay - playerStats.upgrades.fireRate * 10; },
   baseDamage: 10,
-  get damage() { return this.baseDamage + playerStats.upgrades.damage * 2; }
+  get damage() { return this.baseDamage + playerStats.upgrades.damage * 2; },
+  get bulletSpeed() { return 10 + playerStats.upgrades.bulletSpeed * 0.5; },
+  get critChance() { return playerStats.upgrades.critChance * 0.01; },
+  get lifesteal() { return playerStats.upgrades.lifesteal * 0.01; }
 };
 
-// Initialize game elements
-function initGame() {
-  bullets = [];
-  enemies = [];
-  enemyBullets = [];
-  powerups = [];
-  kills = 0;
-  waveCount = 1;
-  gameTime = 0;
-  player.health = player.maxHealth;
-  spawnWalls();
-  spawnEnemy();
-  
-  // Check if mobile
-  isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-  if (isMobile) {
-    mobileControls.style.display = 'flex';
-  } else {
-    mobileControls.style.display = 'none';
+// Camera shake effect
+function applyCameraShake() {
+  if (cameraShake > 0) {
+    ctx.translate(
+      (Math.random() - 0.5) * cameraShake,
+      (Math.random() - 0.5) * cameraShake
+    );
+    cameraShake *= 0.9; // Decay
+    if (cameraShake < 0.1) cameraShake = 0;
   }
 }
 
@@ -90,19 +171,73 @@ function spawnEnemy() {
   else { x = Math.random() * canvas.width; y = canvas.height; }
 
   const waveFactor = Math.log2(waveCount) * 0.2;
+  const enemyType = Math.random() < 0.15 ? 'tank' : 
+                   Math.random() < 0.3 ? 'fast' : 
+                   Math.random() < 0.45 ? 'spread' : 
+                   Math.random() < 0.6 ? 'exploder' : 
+                   'normal';
   
-  enemies.push({
+  const baseEnemy = {
     x,
     y,
     size: 20,
-    color: 'lime',
-    speed: 1.5 + Math.random() * 0.5 + waveFactor,
     lastShot: Date.now(),
-    shootDelay: 2000 + Math.random() * 1000 - Math.min(1000, waveFactor * 200),
     health: 20 + Math.floor(waveFactor * 10),
     maxHealth: 20 + Math.floor(waveFactor * 10),
     damage: 10 + Math.floor(waveFactor * 2)
-  });
+  };
+
+  switch(enemyType) {
+    case 'tank':
+      enemies.push({
+        ...baseEnemy,
+        color: 'blue',
+        size: 30,
+        speed: 0.8 + Math.random() * 0.3,
+        health: baseEnemy.health * 2,
+        maxHealth: baseEnemy.maxHealth * 2,
+        shootDelay: 3000,
+        type: 'tank'
+      });
+      break;
+    case 'fast':
+      enemies.push({
+        ...baseEnemy,
+        color: 'yellow',
+        speed: 3 + Math.random() * 0.5,
+        health: baseEnemy.health * 0.7,
+        maxHealth: baseEnemy.maxHealth * 0.7,
+        shootDelay: 1500,
+        type: 'fast'
+      });
+      break;
+    case 'spread':
+      enemies.push({
+        ...baseEnemy,
+        color: 'purple',
+        speed: 1.2 + Math.random() * 0.3,
+        shootDelay: 2500,
+        type: 'spread'
+      });
+      break;
+    case 'exploder':
+      enemies.push({
+        ...baseEnemy,
+        color: 'orange',
+        speed: 1.0 + Math.random() * 0.2,
+        shootDelay: 4000,
+        type: 'exploder'
+      });
+      break;
+    default:
+      enemies.push({
+        ...baseEnemy,
+        color: 'lime',
+        speed: 1.5 + Math.random() * 0.5,
+        shootDelay: 2000 + Math.random() * 1000 - Math.min(1000, waveFactor * 200),
+        type: 'normal'
+      });
+  }
 }
 
 // Wall spawning
@@ -139,7 +274,7 @@ window.addEventListener('mousemove', (e) => {
 
 window.addEventListener('click', (e) => {
   if (!player.alive || isPaused) return;
-  if (isMobile && e.target !== shootBtn) return; // Don't shoot when tapping elsewhere on mobile
+  if (isMobile && e.target !== shootBtn) return;
   
   shoot();
 });
@@ -195,39 +330,45 @@ function shoot() {
   const now = Date.now();
   if (now - player.lastShot < player.shootDelay) return;
   
-  let angle;
-  if (isMobile) {
-    // Auto-aim to nearest enemy
-    let closestEnemy = null;
-    let minDist = Infinity;
+  let angles = [];
+  
+  // Determine shooting angles
+  if (activePowerups.tripleShot.active) {
+    const mainAngle = isMobile ? 
+      (enemies.length > 0 ? Math.atan2(enemies[0].y - player.y, enemies[0].x - player.x) : Math.random() * Math.PI * 2) :
+      Math.atan2(mouseY - player.y, mouseX - player.x);
     
-    enemies.forEach(enemy => {
-      const dist = Math.hypot(player.x - enemy.x, player.y - enemy.y);
-      if (dist < minDist) {
-        minDist = dist;
-        closestEnemy = enemy;
-      }
-    });
-    
-    if (closestEnemy) {
-      angle = Math.atan2(closestEnemy.y - player.y, closestEnemy.x - player.x);
-    } else {
-      // No enemies, shoot in random direction
-      angle = Math.random() * Math.PI * 2;
-    }
+    angles = [mainAngle, mainAngle - 0.3, mainAngle + 0.3];
   } else {
-    angle = Math.atan2(mouseY - player.y, mouseX - player.x);
+    let angle;
+    if (isMobile) {
+      if (enemies.length > 0) {
+        angle = Math.atan2(enemies[0].y - player.y, enemies[0].x - player.x);
+      } else {
+        angle = Math.random() * Math.PI * 2;
+      }
+    } else {
+      angle = Math.atan2(mouseY - player.y, mouseX - player.x);
+    }
+    angles = [angle];
   }
   
-  const speed = 10;
-  bullets.push({
-    x: player.x,
-    y: player.y,
-    dx: Math.cos(angle) * speed,
-    dy: Math.sin(angle) * speed,
-    size: 5,
-    color: 'red',
-    damage: player.damage
+  // Create bullets
+  angles.forEach(angle => {
+    const isCrit = Math.random() < player.critChance;
+    const damage = activePowerups.rage.active ? 
+      player.damage * 2 : 
+      (isCrit ? player.damage * 1.5 : player.damage);
+    
+    bullets.push({
+      x: player.x,
+      y: player.y,
+      dx: Math.cos(angle) * player.bulletSpeed,
+      dy: Math.sin(angle) * player.bulletSpeed,
+      size: isCrit ? 7 : 5,
+      color: isCrit ? 'gold' : 'red',
+      damage
+    });
   });
   
   player.lastShot = now;
@@ -264,7 +405,6 @@ function addXP(amount) {
 // Show level up options
 function showLevelUp() {
   isPaused = true;
-  const levelUpScreen = document.getElementById('levelUpScreen');
   levelUpScreen.style.display = 'block';
   
   document.getElementById('upgradeSpeed').onclick = () => {
@@ -291,6 +431,41 @@ function showLevelUp() {
     levelUpScreen.style.display = 'none';
     isPaused = false;
   };
+  
+  document.getElementById('upgradeBulletSpeed').onclick = () => {
+    playerStats.upgrades.bulletSpeed++;
+    levelUpScreen.style.display = 'none';
+    isPaused = false;
+  };
+  
+  document.getElementById('upgradeCritChance').onclick = () => {
+    playerStats.upgrades.critChance++;
+    levelUpScreen.style.display = 'none';
+    isPaused = false;
+  };
+  
+  document.getElementById('upgradeLifesteal').onclick = () => {
+    playerStats.upgrades.lifesteal++;
+    levelUpScreen.style.display = 'none';
+    isPaused = false;
+  };
+}
+
+// Enemy Death Particles
+function createParticles(x, y, color, count = 20) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = Math.random() * 3 + 1;
+    particles.push({
+      x,
+      y,
+      dx: Math.cos(angle) * speed,
+      dy: Math.sin(angle) * speed,
+      size: Math.random() * 4 + 2,
+      color,
+      life: 30 + Math.random() * 30
+    });
+  }
 }
 
 // Game update logic
@@ -307,10 +482,16 @@ function update() {
     moveX = joystickX / 8;
     moveY = joystickY / 8;
   } else {
-    if (keys['w']) moveY -= player.speed;
-    if (keys['s']) moveY += player.speed;
-    if (keys['a']) moveX -= player.speed;
-    if (keys['d']) moveX += player.speed;
+    if (keys['w'] || keys['arrowup']) moveY -= player.speed;
+    if (keys['s'] || keys['arrowdown']) moveY += player.speed;
+    if (keys['a'] || keys['arrowleft']) moveX -= player.speed;
+    if (keys['d'] || keys['arrowright']) moveX += player.speed;
+  }
+  
+  // Normalize diagonal movement
+  if (moveX !== 0 && moveY !== 0) {
+    moveX *= 0.7071; // 1/sqrt(2)
+    moveY *= 0.7071;
   }
   
   let nextX = player.x + moveX;
@@ -337,18 +518,65 @@ function update() {
     // Enemy shooting
     if (Date.now() - enemy.lastShot > enemy.shootDelay && 
         !checkCollision(enemy.x, enemy.y, enemy.size)) {
-      enemyBullets.push({
-        x: enemy.x,
-        y: enemy.y,
-        dx: Math.cos(angle) * 6,
-        dy: Math.sin(angle) * 6,
-        size: 5,
-        color: 'orange',
-        damage: enemy.damage
-      });
+    
+      if (enemy.type === 'spread') {
+        // Spread shooter - fires 3 bullets
+        for (let i = -1; i <= 1; i++) {
+          const spreadAngle = angle + i * 0.3;
+          enemyBullets.push({
+            x: enemy.x,
+            y: enemy.y,
+            dx: Math.cos(spreadAngle) * 6,
+            dy: Math.sin(spreadAngle) * 6,
+            size: 5,
+            color: 'purple',
+            damage: enemy.damage
+          });
+        }
+      } else {
+        // Normal shooting
+        enemyBullets.push({
+          x: enemy.x,
+          y: enemy.y,
+          dx: Math.cos(angle) * 6,
+          dy: Math.sin(angle) * 6,
+          size: 5,
+          color: enemy.type === 'tank' ? 'blue' : 
+                 enemy.type === 'fast' ? 'yellow' : 
+                 enemy.type === 'exploder' ? 'orange' : 'red',
+          damage: enemy.damage
+        });
+      }
+      
       enemy.lastShot = Date.now();
+      
+      if (enemy.type === 'exploder') {
+        // Exploding enemy dies after shooting
+        createParticles(enemy.x, enemy.y, 'orange', 30);
+        enemies.splice(enemies.indexOf(enemy), 1);
+        
+        // Explosion damage to player
+        const distToPlayer = Math.hypot(player.x - enemy.x, player.y - enemy.y);
+        if (distToPlayer < 100) {
+          const damage = enemy.damage * 2 * (1 - distToPlayer / 100);
+          player.health -= damage;
+          cameraShake = MAX_SHAKE * 1.5;
+        }
+      }
     }
   });
+
+  // Particle update
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.dx;
+    p.y += p.dy;
+    p.life--;
+    
+    if (p.life <= 0) {
+      particles.splice(i, 1);
+    }
+  }
 
   // Enemy bullet update
   for (let i = enemyBullets.length - 1; i >= 0; i--) {
@@ -373,7 +601,9 @@ function update() {
     // Player collision
     const dist = Math.hypot(bullet.x - player.x, bullet.y - player.y);
     if (dist < player.size + bullet.size) {
-      player.health -= bullet.damage;
+      if (!activePowerups.shield.active) {
+        player.health -= bullet.damage;
+      }
       enemyBullets.splice(i, 1);
       if (player.health <= 0) player.alive = false;
       continue;
@@ -393,12 +623,40 @@ function update() {
     const p = powerups[i];
     const dist = Math.hypot(player.x - p.x, player.y - p.y);
     if (dist < player.size + p.size) {
-      if (p.type === 'health') {
-        player.health = Math.min(player.maxHealth, player.health + 20);
-      } else if (p.type === 'xp') {
-        addXP(25);
+      switch(p.type) {
+        case POWERUP_TYPES.HEALTH:
+          player.health = Math.min(player.maxHealth, player.health + 20);
+          break;
+        case POWERUP_TYPES.XP:
+          addXP(25);
+          break;
+        case POWERUP_TYPES.SHIELD:
+          activePowerups.shield.active = true;
+          activePowerups.shield.endTime = Date.now() + 10000; // 10 seconds
+          break;
+        case POWERUP_TYPES.TRIPLE_SHOT:
+          activePowerups.tripleShot.active = true;
+          activePowerups.tripleShot.endTime = Date.now() + 8000; // 8 seconds
+          break;
+        case POWERUP_TYPES.SPEED_BOOST:
+          activePowerups.speedBoost.active = true;
+          activePowerups.speedBoost.endTime = Date.now() + 7000; // 7 seconds
+          break;
+        case POWERUP_TYPES.RAGE:
+          activePowerups.rage.active = true;
+          activePowerups.rage.endTime = Date.now() + 5000; // 5 seconds
+          break;
       }
+      createParticles(p.x, p.y, p.color);
       powerups.splice(i, 1);
+    }
+  }
+
+  // Check powerup expiration
+  const now = Date.now();
+  for (const type in activePowerups) {
+    if (activePowerups[type].active && now > activePowerups[type].endTime) {
+      activePowerups[type].active = false;
     }
   }
 
@@ -435,15 +693,32 @@ function update() {
         bullets.splice(i, 1);
         hit = true;
 
+        // Apply lifesteal
+        if (player.lifesteal > 0) {
+          player.health = Math.min(player.maxHealth, player.health + bullet.damage * player.lifesteal);
+        }
+
         if (enemy.health <= 0) {
           // Chance to drop powerup
           if (Math.random() < 0.2) {
+            const powerupType = Math.random() < 0.7 ? POWERUP_TYPES.HEALTH : 
+                               Math.random() < 0.8 ? POWERUP_TYPES.XP :
+                               Math.random() < 0.85 ? POWERUP_TYPES.SHIELD :
+                               Math.random() < 0.9 ? POWERUP_TYPES.TRIPLE_SHOT :
+                               Math.random() < 0.95 ? POWERUP_TYPES.SPEED_BOOST :
+                               POWERUP_TYPES.RAGE;
+            
             powerups.push({
               x: enemy.x,
               y: enemy.y,
-              type: Math.random() < 0.7 ? 'health' : 'xp',
+              type: powerupType,
               size: 10,
-              color: Math.random() < 0.7 ? 'pink' : 'yellow'
+              color: powerupType === POWERUP_TYPES.HEALTH ? 'pink' : 
+                     powerupType === POWERUP_TYPES.XP ? 'yellow' :
+                     powerupType === POWERUP_TYPES.SHIELD ? 'cyan' :
+                     powerupType === POWERUP_TYPES.TRIPLE_SHOT ? 'magenta' :
+                     powerupType === POWERUP_TYPES.SPEED_BOOST ? 'lime' :
+                     'red'
             });
           }
           
@@ -458,6 +733,7 @@ function update() {
             for (let k = 0; k < waveCount; k++) {
               setTimeout(spawnEnemy, k * 500); // Staggered spawning
             }
+            spawnWalls();
           }
         }
         break;
@@ -477,7 +753,9 @@ function update() {
 // Drawing functions
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-
+  ctx.save();
+  applyCameraShake();
+  
   // Draw walls
   walls.forEach(wall => {
     ctx.fillStyle = '#444';
@@ -525,6 +803,16 @@ function draw() {
     ctx.fill();
   });
 
+  // Draw particles
+  particles.forEach(p => {
+    ctx.globalAlpha = p.life / 60; // Fade out
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  });
+
   // Draw enemies
   enemies.forEach(enemy => {
     ctx.fillStyle = enemy.color;
@@ -560,12 +848,24 @@ function draw() {
   ctx.fillStyle = 'white';
   ctx.font = '18px Arial';
   ctx.fillText(`Wave: ${Math.floor(Math.log2(waveCount)) + 1} | Kills: ${kills}/${waveCount}`, 20, 60);
-  ctx.fillText(`Health: ${player.health}/${player.maxHealth}`, 20, 90);
+  ctx.fillText(`Health: ${Math.floor(player.health)}/${player.maxHealth}`, 20, 90);
   ctx.fillText(`Time: ${(gameTime/1000).toFixed(1)}s`, 20, 120);
   ctx.fillText(`Level: ${playerStats.level} (${playerStats.xp}/${playerStats.xpToNextLevel} XP)`, 20, 150);
 
+  // Active powerups
+  let powerupY = 180;
+  for (const type in activePowerups) {
+    if (activePowerups[type].active) {
+      const timeLeft = (activePowerups[type].endTime - Date.now()) / 1000;
+      if (timeLeft > 0) {
+        ctx.fillText(`${type.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}: ${timeLeft.toFixed(1)}s`, 20, powerupY);
+        powerupY += 30;
+      }
+    }
+  }
+
   // Pause screen
-  if (isPaused && document.getElementById('levelUpScreen').style.display === 'none') {
+  if (isPaused && levelUpScreen.style.display === 'none') {
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = 'white';
@@ -583,24 +883,36 @@ function draw() {
     ctx.fillStyle = 'white';
     ctx.font = '48px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2);
+    ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2 - 80);
     ctx.font = '24px Arial';
-    ctx.fillText(`Reached Wave ${Math.floor(Math.log2(waveCount)) + 1}`, canvas.width / 2, canvas.height / 2 + 50);
-    ctx.fillText(`Survived for ${(gameTime/1000).toFixed(1)} seconds`, canvas.width / 2, canvas.height / 2 + 90);
-    ctx.fillText(`Level ${playerStats.level}`, canvas.width / 2, canvas.height / 2 + 130);
+    ctx.fillText(`Reached Wave ${Math.floor(Math.log2(waveCount)) + 1}`, canvas.width / 2, canvas.height / 2 - 30);
+    ctx.fillText(`Survived for ${(gameTime/1000).toFixed(1)} seconds`, canvas.width / 2, canvas.height / 2 + 10);
+    ctx.fillText(`Level ${playerStats.level}`, canvas.width / 2, canvas.height / 2 + 50);
+    
+    // Add to leaderboard
+    const nickname = localStorage.getItem('playerNickname') || 'Player';
+    leaderboard.addScore(nickname, Math.floor(Math.log2(waveCount)) + 1, gameTime/1000, playerStats.level);
+    
     restartBtn.style.display = 'block';
   }
+
+  ctx.restore();
 }
 
-// Game loop
-function gameLoop() {
-  update();
-  draw();
-  requestAnimationFrame(gameLoop);
-}
-
-// Restart handler
-restartBtn.addEventListener('click', () => {
+function initGame() {
+  // Reset game state
+  bullets = [];
+  enemies = [];
+  enemyBullets = [];
+  walls = [];
+  powerups = [];
+  particles = [];
+  kills = 0;
+  waveCount = 1;
+  gameTime = 0;
+  cameraShake = 0;
+  
+  // Reset player
   player.x = canvas.width / 2;
   player.y = canvas.height / 2;
   player.health = player.maxHealth;
@@ -615,20 +927,71 @@ restartBtn.addEventListener('click', () => {
     speed: 0,
     health: 0,
     damage: 0,
-    fireRate: 0
+    fireRate: 0,
+    bulletSpeed: 0,
+    critChance: 0,
+    lifesteal: 0
   };
   
-  initGame();
+  // Reset powerups
+  for (const type in activePowerups) {
+    activePowerups[type].active = false;
+  }
+  
+  // Spawn initial enemies and walls
+  for (let i = 0; i < 3; i++) {
+    spawnEnemy();
+  }
+  spawnWalls();
+  
+  // Check if mobile
+  isMobile = /Mobi|Android/i.test(navigator.userAgent);
+  mobileControls.style.display = isMobile ? 'flex' : 'none';
+  
+  // Hide restart button
   restartBtn.style.display = 'none';
-  document.getElementById('levelUpScreen').style.display = 'none';
-});
+  
+  // Hide level up screen
+  levelUpScreen.style.display = 'none';
+}
 
-// Handle window resize
-window.addEventListener('resize', () => {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-});
+// Game loop function
+function gameLoop() {
+  if (!isPaused) {
+    update();
+  }
+  draw();
+  requestAnimationFrame(gameLoop);
+}
 
-// Start the game
-initGame();
-gameLoop();
+// Initialize the game
+function initialize() {
+  // Load nickname if exists
+  const savedName = localStorage.getItem('playerNickname');
+  if (savedName) {
+    nicknameInput.value = savedName;
+  }
+  leaderboard.display();
+  
+  // Set up start button handler
+  startBtn.addEventListener('click', () => {
+    const nickname = nicknameInput.value.trim() || 'Player';
+    localStorage.setItem('playerNickname', nickname);
+    
+    initGame();
+    gameLoop();
+  });
+  
+  // Set up restart button handler
+  restartBtn.addEventListener('click', () => {
+    initGame();
+  });
+  
+  // Handle window resize
+  window.addEventListener('resize', () => {
+    resizeCanvas();
+  });
+}
+
+// Start everything when the DOM is loaded
+document.addEventListener('DOMContentLoaded', initialize);
