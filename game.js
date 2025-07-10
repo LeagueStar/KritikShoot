@@ -407,48 +407,64 @@ function showLevelUp() {
   isPaused = true;
   levelUpScreen.style.display = 'block';
   
-  document.getElementById('upgradeSpeed').onclick = () => {
-    playerStats.upgrades.speed++;
-    levelUpScreen.style.display = 'none';
-    isPaused = false;
+  // Create a single handler function to avoid repetition
+  const createUpgradeHandler = (upgradeType, extraAction = null) => {
+    return () => {
+      playerStats.upgrades[upgradeType]++;
+      if (extraAction) extraAction();
+      levelUpScreen.style.display = 'none';
+      
+      // Use requestAnimationFrame for better timing
+      requestAnimationFrame(() => {
+        isPaused = false;
+        canvas.focus();
+        
+        // Force a game loop update
+        if (!player.alive) return;
+        update();
+        draw();
+      });
+    };
   };
-  
-  document.getElementById('upgradeHealth').onclick = () => {
-    playerStats.upgrades.health++;
-    player.health = player.maxHealth; // Heal to full when upgrading health
-    levelUpScreen.style.display = 'none';
-    isPaused = false;
+
+  // Clear existing handlers
+  const clearHandler = (id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.onclick = null;
+      if (el._upgradeHandler) {
+        el.removeEventListener('click', el._upgradeHandler);
+      }
+    }
   };
-  
-  document.getElementById('upgradeDamage').onclick = () => {
-    playerStats.upgrades.damage++;
-    levelUpScreen.style.display = 'none';
-    isPaused = false;
+
+  // Clear all handlers
+  clearHandler('upgradeSpeed');
+  clearHandler('upgradeHealth');
+  clearHandler('upgradeDamage');
+  clearHandler('upgradeFireRate');
+  clearHandler('upgradeBulletSpeed');
+  clearHandler('upgradeCritChance');
+  clearHandler('upgradeLifesteal');
+
+  // Set up new handlers
+  const setHandler = (id, upgradeType, extraAction = null) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el._upgradeHandler = createUpgradeHandler(upgradeType, extraAction);
+      el.onclick = el._upgradeHandler;
+    }
   };
-  
-  document.getElementById('upgradeFireRate').onclick = () => {
-    playerStats.upgrades.fireRate++;
-    levelUpScreen.style.display = 'none';
-    isPaused = false;
-  };
-  
-  document.getElementById('upgradeBulletSpeed').onclick = () => {
-    playerStats.upgrades.bulletSpeed++;
-    levelUpScreen.style.display = 'none';
-    isPaused = false;
-  };
-  
-  document.getElementById('upgradeCritChance').onclick = () => {
-    playerStats.upgrades.critChance++;
-    levelUpScreen.style.display = 'none';
-    isPaused = false;
-  };
-  
-  document.getElementById('upgradeLifesteal').onclick = () => {
-    playerStats.upgrades.lifesteal++;
-    levelUpScreen.style.display = 'none';
-    isPaused = false;
-  };
+
+  setHandler('upgradeSpeed', 'speed');
+  setHandler('upgradeHealth', 'health', () => {
+    player.health = player.maxHealth;
+  });
+  setHandler('upgradeDamage', 'damage');
+  setHandler('upgradeFireRate', 'fireRate');
+  setHandler('upgradeBulletSpeed', 'bulletSpeed');
+  setHandler('upgradeCritChance', 'critChance');
+  setHandler('upgradeLifesteal', 'lifesteal');
 }
 
 // Enemy Death Particles
@@ -917,7 +933,7 @@ function initGame() {
   player.y = canvas.height / 2;
   player.health = player.maxHealth;
   player.alive = true;
-  isPaused = false;
+  isPaused = false; // Ensure game isn't paused
   
   // Reset player stats
   playerStats.level = 1;
@@ -953,6 +969,14 @@ function initGame() {
   
   // Hide level up screen
   levelUpScreen.style.display = 'none';
+  
+  // Focus canvas for keyboard controls
+  canvas.focus();
+  
+  // Force a redraw
+  if (!player.alive) return;
+  update();
+  draw();
 }
 
 // Game loop function
@@ -961,6 +985,12 @@ function gameLoop() {
     update();
   }
   draw();
+  
+  // Add this check to prevent stuck state
+  if (levelUpScreen.style.display === 'block') {
+    isPaused = true;
+  }
+  
   requestAnimationFrame(gameLoop);
 }
 
@@ -973,10 +1003,19 @@ function initialize() {
   }
   leaderboard.display();
   
+  // Get reference to the start screen element
+  const startScreen = document.getElementById('startScreen');
+  
   // Set up start button handler
   startBtn.addEventListener('click', () => {
     const nickname = nicknameInput.value.trim() || 'Player';
     localStorage.setItem('playerNickname', nickname);
+    
+    // Hide the start screen
+    startScreen.classList.add('hidden');
+    
+    // Focus the canvas for keyboard input
+    canvas.focus();
     
     initGame();
     gameLoop();
@@ -985,6 +1024,8 @@ function initialize() {
   // Set up restart button handler
   restartBtn.addEventListener('click', () => {
     initGame();
+    // Show the start screen again when restarting
+    startScreen.classList.remove('hidden');
   });
   
   // Handle window resize
