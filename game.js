@@ -16,22 +16,31 @@ const leaderboard = {
   scores: JSON.parse(localStorage.getItem('leaderboard')) || [],
   
   addScore: function(nickname, wave, time, level) {
-    this.scores.push({
+    // Only add if score is better than existing ones
+    const newScore = {
       nickname,
       wave,
       time,
       level,
       date: new Date().toLocaleDateString()
-    });
+    };
     
-    // Sort by wave then time
+    // Add new score and sort
+    this.scores.push(newScore);
     this.scores.sort((a, b) => b.wave - a.wave || b.time - a.time);
     
-    // Keep only top scores
-    if (this.scores.length > this.maxEntries) {
-      this.scores = this.scores.slice(0, this.maxEntries);
-    }
+    // Remove duplicates and keep only top scores
+    const uniqueScores = [];
+    const seen = new Set();
+    this.scores.forEach(score => {
+      const key = `${score.nickname}-${score.wave}-${score.time}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueScores.push(score);
+      }
+    });
     
+    this.scores = uniqueScores.slice(0, this.maxEntries);
     localStorage.setItem('leaderboard', JSON.stringify(this.scores));
     this.display();
   },
@@ -46,7 +55,7 @@ const leaderboard = {
     }
     
     let html = '<h3>Leaderboard</h3><table style="width:100%; border-collapse:collapse;">';
-    html += '<tr><th>Rank</th><th>Name</th><th>Wave</th><th>Time</th></tr>';
+    html += '<tr><th>Rank</th><th>Name</th><th>Wave</th><th>Time</th><th>Level</th></tr>';
     
     this.scores.forEach((score, index) => {
       html += `
@@ -55,6 +64,7 @@ const leaderboard = {
           <td>${score.nickname || 'Anonymous'}</td>
           <td>${score.wave}</td>
           <td>${score.time.toFixed(1)}s</td>
+          <td>${score.level}</td>
         </tr>
       `;
     });
@@ -170,7 +180,8 @@ function spawnEnemy() {
   else if (side === 2) { x = Math.random() * canvas.width; y = 0; }
   else { x = Math.random() * canvas.width; y = canvas.height; }
 
-  const waveFactor = Math.log2(waveCount) * 0.2;
+  // Modified wave scaling formula
+  const waveFactor = Math.max(1, Math.log(waveCount + 1)) * 0.5;
   const enemyType = Math.random() < 0.15 ? 'tank' : 
                    Math.random() < 0.3 ? 'fast' : 
                    Math.random() < 0.45 ? 'spread' : 
@@ -484,7 +495,7 @@ function createParticles(x, y, color, count = 20) {
   }
 }
 
-// Game update logic
+// Update function 
 function update() {
   if (!player.alive || isPaused) return;
   
@@ -600,6 +611,8 @@ function update() {
     bullet.x += bullet.dx;
     bullet.y += bullet.dy;
 
+    let hit = false;
+
     // Wall collision
     for (let j = walls.length - 1; j >= 0; j--) {
       const wall = walls[j];
@@ -610,9 +623,12 @@ function update() {
         wall.health -= bullet.damage;
         enemyBullets.splice(i, 1);
         if (wall.health <= 0) walls.splice(j, 1);
+        hit = true;
         break;
       }
     }
+
+    if (hit) continue;
 
     // Player collision
     const dist = Math.hypot(bullet.x - player.x, bullet.y - player.y);
@@ -631,6 +647,7 @@ function update() {
       bullet.y < 0 || bullet.y > canvas.height
     ) {
       enemyBullets.splice(i, 1);
+      continue;
     }
   }
 
@@ -699,6 +716,8 @@ function update() {
       }
     }
 
+    if (hit) continue;
+
     // Enemy collision
     for (let j = enemies.length - 1; j >= 0; j--) {
       const enemy = enemies[j];
@@ -714,43 +733,55 @@ function update() {
           player.health = Math.min(player.maxHealth, player.health + bullet.damage * player.lifesteal);
         }
 
-        if (enemy.health <= 0) {
-          // Chance to drop powerup
-          if (Math.random() < 0.2) {
-            const powerupType = Math.random() < 0.7 ? POWERUP_TYPES.HEALTH : 
-                               Math.random() < 0.8 ? POWERUP_TYPES.XP :
-                               Math.random() < 0.85 ? POWERUP_TYPES.SHIELD :
-                               Math.random() < 0.9 ? POWERUP_TYPES.TRIPLE_SHOT :
-                               Math.random() < 0.95 ? POWERUP_TYPES.SPEED_BOOST :
-                               POWERUP_TYPES.RAGE;
-            
-            powerups.push({
-              x: enemy.x,
-              y: enemy.y,
-              type: powerupType,
-              size: 10,
-              color: powerupType === POWERUP_TYPES.HEALTH ? 'pink' : 
-                     powerupType === POWERUP_TYPES.XP ? 'yellow' :
-                     powerupType === POWERUP_TYPES.SHIELD ? 'cyan' :
-                     powerupType === POWERUP_TYPES.TRIPLE_SHOT ? 'magenta' :
-                     powerupType === POWERUP_TYPES.SPEED_BOOST ? 'lime' :
-                     'red'
-            });
-          }
-          
-          enemies.splice(j, 1);
-          kills++;
-          addXP(10 + Math.floor(Math.log2(waveCount)) * 2);
+if (enemy.health <= 0) {
+  // Chance to drop powerup
+  if (Math.random() < 0.2) {
+    const powerupType = Math.random() < 0.7 ? POWERUP_TYPES.HEALTH : 
+                      Math.random() < 0.8 ? POWERUP_TYPES.XP :
+                      Math.random() < 0.85 ? POWERUP_TYPES.SHIELD :
+                      Math.random() < 0.9 ? POWERUP_TYPES.TRIPLE_SHOT :
+                      Math.random() < 0.95 ? POWERUP_TYPES.SPEED_BOOST :
+                      POWERUP_TYPES.RAGE;
+    
+    powerups.push({
+      x: enemy.x,
+      y: enemy.y,
+      type: powerupType,
+      size: 10,
+      color: powerupType === POWERUP_TYPES.HEALTH ? 'pink' : 
+             powerupType === POWERUP_TYPES.XP ? 'yellow' :
+             powerupType === POWERUP_TYPES.SHIELD ? 'cyan' :
+             powerupType === POWERUP_TYPES.TRIPLE_SHOT ? 'magenta' :
+             powerupType === POWERUP_TYPES.SPEED_BOOST ? 'lime' :
+             'red'
+    });
+  }
+  
+  enemies.splice(j, 1);
+  kills++;
+  addXP(10 + Math.floor(Math.log2(waveCount)) * 2);
 
-          // Wave progression
-          if (kills >= waveCount) {
-            kills = 0;
-            waveCount += 2;
-            for (let k = 0; k < waveCount; k++) {
-              setTimeout(spawnEnemy, k * 500); // Staggered spawning
-            }
-            spawnWalls();
-          }
+  // FIXED WAVE PROGRESSION SYSTEM
+  if (kills >= waveCount && enemies.length === 0) {
+    kills = 0;
+    waveCount++;
+    
+    // Calculate enemies for next wave: base 2 + wave number
+    const baseEnemies = 2 + waveCount;
+    const enemiesToSpawn = Math.min(30, baseEnemies);
+    
+    // Spawn all new enemies at once
+    for (let k = 0; k < enemiesToSpawn; k++) {
+      spawnEnemy();
+    }
+    
+    // Every 3 waves, spawn new walls
+    if (waveCount % 3 === 0) {
+      spawnWalls();
+    }
+    
+    cameraShake = 5;
+  }
         }
         break;
       }
@@ -863,7 +894,7 @@ function draw() {
   // Game info
   ctx.fillStyle = 'white';
   ctx.font = '18px Arial';
-  ctx.fillText(`Wave: ${Math.floor(Math.log2(waveCount)) + 1} | Kills: ${kills}/${waveCount}`, 20, 60);
+  ctx.fillText(`Wave: ${waveCount} | Kills: ${kills}/${waveCount} | Enemies: ${enemies.length}`, 20, 60);
   ctx.fillText(`Health: ${Math.floor(player.health)}/${player.maxHealth}`, 20, 90);
   ctx.fillText(`Time: ${(gameTime/1000).toFixed(1)}s`, 20, 120);
   ctx.fillText(`Level: ${playerStats.level} (${playerStats.xp}/${playerStats.xpToNextLevel} XP)`, 20, 150);
@@ -901,13 +932,13 @@ function draw() {
     ctx.textAlign = 'center';
     ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2 - 80);
     ctx.font = '24px Arial';
-    ctx.fillText(`Reached Wave ${Math.floor(Math.log2(waveCount)) + 1}`, canvas.width / 2, canvas.height / 2 - 30);
+    ctx.fillText(`Reached Wave ${waveCount}`, canvas.width / 2, canvas.height / 2 - 30);
     ctx.fillText(`Survived for ${(gameTime/1000).toFixed(1)} seconds`, canvas.width / 2, canvas.height / 2 + 10);
     ctx.fillText(`Level ${playerStats.level}`, canvas.width / 2, canvas.height / 2 + 50);
     
     // Add to leaderboard
     const nickname = localStorage.getItem('playerNickname') || 'Player';
-    leaderboard.addScore(nickname, Math.floor(Math.log2(waveCount)) + 1, gameTime/1000, playerStats.level);
+    leaderboard.addScore(nickname, waveCount, gameTime/1000, playerStats.level);
     
     restartBtn.style.display = 'block';
   }
@@ -933,7 +964,7 @@ function initGame() {
   player.y = canvas.height / 2;
   player.health = player.maxHealth;
   player.alive = true;
-  isPaused = false; // Ensure game isn't paused
+  isPaused = false;
   
   // Reset player stats
   playerStats.level = 1;
@@ -954,23 +985,19 @@ function initGame() {
     activePowerups[type].active = false;
   }
   
-  // Spawn initial enemies and walls
-  for (let i = 0; i < 3; i++) {
+  // Spawn initial enemies (2 for wave 1)
+  for (let i = 0; i < 2; i++) {
     spawnEnemy();
   }
   spawnWalls();
   
-  // Check if mobile
+  // Mobile controls
   isMobile = /Mobi|Android/i.test(navigator.userAgent);
   mobileControls.style.display = isMobile ? 'flex' : 'none';
   
-  // Hide restart button
+  // UI elements
   restartBtn.style.display = 'none';
-  
-  // Hide level up screen
   levelUpScreen.style.display = 'none';
-  
-  // Focus canvas for keyboard controls
   canvas.focus();
   
   // Force a redraw
@@ -1012,7 +1039,7 @@ function initialize() {
     localStorage.setItem('playerNickname', nickname);
     
     // Hide the start screen
-    startScreen.classList.add('hidden');
+    startScreen.style.display = 'none';
     
     // Focus the canvas for keyboard input
     canvas.focus();
@@ -1025,7 +1052,7 @@ function initialize() {
   restartBtn.addEventListener('click', () => {
     initGame();
     // Show the start screen again when restarting
-    startScreen.classList.remove('hidden');
+    startScreen.style.display = 'block';
   });
   
   // Handle window resize
