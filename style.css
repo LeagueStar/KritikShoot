@@ -15,6 +15,29 @@ canvas {
   height: 100vh;
 }
 
+/* Start Screen Styles */
+#startScreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+  color: white;
+  text-align: center;
+  transition: opacity 0.5s ease;
+}
+
+#startScreen.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
 #mobileControls {
   position: fixed;
   bottom: 20px;
@@ -84,6 +107,7 @@ canvas {
 #restartBtn:hover {
   background: #666;
 }
+
 /* Add this to your existing CSS */
 #gameCanvas {
   position: fixed;
@@ -94,6 +118,6 @@ canvas {
 }
 
 /* Ensure UI elements are above canvas */
-#mobileControls, #levelUpScreen, #restartBtn {
+#mobileControls, #levelUpScreen, #restartBtn, #startScreen {
   z-index: 2;
 }
