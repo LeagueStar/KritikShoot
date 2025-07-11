@@ -42,8 +42,8 @@ Survive endless enemy waves, collect power-ups, level up, and aim for the top of
 ✅ Local leaderboard  
 ✅ Mobile controls  
 ✅ Power-ups & upgrades  
-🟢 More enemy types  
-🟢 Global leaderboard 
+✅ More enemy types  
+✅ Global leaderboard 
 
 ---
 
