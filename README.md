@@ -2,7 +2,7 @@
 
 **A fast-paced top-down shooter built with vanilla JS + HTML5 Canvas.**
 
-Survive endless enemy waves, collect power-ups, level up, and aim for the top of the local leaderboard.
+Survive endless enemy waves, collect power-ups, level up, and aim for the top of the Global Leaderboard.
 
 ---
 
