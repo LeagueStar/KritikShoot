@@ -1,4 +1,3 @@
-#restart 1 (23/08)
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
@@ -1136,4 +1135,3 @@ function initialize() {
 
 // Start everything when the DOM is loaded
 document.addEventListener('DOMContentLoaded', initialize);
-
