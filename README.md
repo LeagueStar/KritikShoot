@@ -1,58 +1,57 @@
-# KritikShoot 🚀
+<div align="center">
 
-**A fast-paced top-down shooter built with vanilla JS + HTML5 Canvas.**
+# ✧ KRITIKSHOOT ✧
 
-Survive endless enemy waves, collect power-ups, level up, and aim for the top of the Global Leaderboard.
+**A High-Performance Neon-Noir Survival Shooter**
 
----
+[![HTML5](https://img.shields.io/badge/HTML5-050810?style=for-the-badge&logo=html5&logoColor=00e5ff)](#)
+[![Vanilla JS](https://img.shields.io/badge/Vanilla_JS-050810?style=for-the-badge&logo=javascript&logoColor=00e5ff)](#)
+[![CSS3](https://img.shields.io/badge/CSS3-050810?style=for-the-badge&logo=css3&logoColor=00e5ff)](#)
 
-## ▶️ Play Now
+> *No frameworks. No bloat. Pure frame-perfect performance.*
 
-👉 [Play on GitHub Pages](https://leaguestar.github.io/KritikShoot/)
+<br>
 
----
+</div>
 
-## 📸 Preview
+<br>
 
-<img width="1319" height="638" alt="image" src="https://github.com/user-attachments/assets/315d4fbf-74f9-4a03-ae94-0f22ef308dc5" />
-<img width="1325" height="642" alt="image" src="https://github.com/user-attachments/assets/e9ac8096-ca4f-47ed-8f90-1631d12a05d3" />
-<img width="1322" height="639" alt="image" src="https://github.com/user-attachments/assets/a93c15ae-487f-4c1e-8f4e-da385274b0d8" />
+## ⟡ The Vision
+**KritikShoot** is a relentlessly fast-paced, wave-based survival shooter built entirely from scratch. Engineered with a custom rendering loop and strict memory management, it delivers a flawless, stutter-free neon experience across both desktop and mobile platforms.
 
+<br>
 
----
+## ⟡ Mechanics & Features
 
-## 🎮 Controls
+<details>
+<summary><b>View Gameplay Features</b></summary>
+<br>
 
-- **PC:** Move with **WASD**, aim with **mouse**, click to shoot.
-- **Mobile:** Use the on-screen joystick and shoot button.
+- 🩸 **RPG Progression:** Dynamic wave scaling with 5 distinct enemy archetypes (Tank, Fast, Spread, Exploder, Normal).
+- ⚡ **Tactical Upgrades:** Interactive level-up system featuring Lifesteal, Fire Rate, Crit Chance, and Bullet Speed.
+- 🕹️ **Universal Input:** Native WASD/Mouse tracking for desktop + custom multi-touch virtual joysticks for mobile.
+- 🏆 **Local Persistence:** Integrated high-score leaderboards directly linked to browser LocalStorage.
 
----
+</details>
 
-## 🌟 Features
+<br>
 
-- Local leaderboard — enter your nickname & save scores.
-- Upgrades & power-ups.
-- Works on desktop & mobile.
-- Lightweight: pure HTML/CSS/JS, no frameworks.
+## ⟡ Under The Hood
+This isn't just a game; it's a lightweight custom engine. 
 
----
+* **Zero GC Stutter:** Built with strict **Object Pooling** for bullets and particles, ensuring memory isn't constantly allocated and destroyed during intense waves.
+* **Optimized Physics:** Utilizes `distanceSq` calculations to completely bypass expensive `Math.sqrt()` operations in hot collision loops.
+* **Cinematic Rendering:** Layered `ctx.shadowBlur` glowing entities, coupled with sine-wave exponential decay camera shake for smooth, satisfying impact physics.
+* **Resolution Agnostic:** Custom CSS variables (`--ui-scale`) dynamically adapt the Glassmorphism HUD to any viewport size perfectly.
 
-## 🗺️ Roadmap
+<br>
 
-✅ Local leaderboard  
-✅ Mobile controls  
-✅ Power-ups & upgrades  
-✅ More enemy types  
-✅ Global leaderboard 
+## ⟡ Deployment
+Because KritikShoot is 100% vanilla, getting started takes seconds. No `npm install`. No build steps.
 
----
+```bash
+# 1. Clone the repository
+git clone [https://github.com/LeagueStar/KritikShoot.git](https://github.com/LeagueStar/KritikShoot.git)
 
-## ✨ Author
-
-Made by [LeagueStar](https://github.com/LeagueStar) ❤️
-
----
-
-## 📜 License
-
-This project will use the MIT License.
+# 2. Navigate to the directory
+cd KritikShoot
