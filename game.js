@@ -1,1137 +1,1474 @@
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
+/**
+ * KritikShoot — game.js
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Architecture  : ES6 Classes, single-responsibility, no global state
+ * Game Loop     : requestAnimationFrame + Delta-Time (dt) — frame-rate agnostic
+ * Memory        : Object Pools for Bullets and Particles (zero GC stutter)
+ * Collision     : distanceSq optimisation — avoids sqrt in hot loops
+ * Rendering     : ctx.shadowBlur neon glows, layered draw order
+ * Camera Shake  : sine-wave decay (smooth, not chaotic)
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
 
-// UI Scaling variables
-let uiScale = 1;
-let baseFontSize = 18;
+"use strict";
 
-// UI elements
-const restartBtn = document.getElementById('restartBtn');
-const mobileControls = document.getElementById('mobileControls');
-const joystick = document.getElementById('joystick');
-const shootBtn = document.getElementById('shootBtn');
-const startBtn = document.getElementById('startBtn');
-const nicknameInput = document.getElementById('nicknameInput');
-const levelUpScreen = document.getElementById('levelUpScreen');
+// =============================================================================
+// SECTION 1 — CONFIGURATION
+// Central source of truth for every magic number in the game.
+// Changing a value here propagates everywhere; no hunting through code.
+// =============================================================================
+const CONFIG = Object.freeze({
 
-// Leaderboard implementation
-const leaderboard = {
-    maxEntries: 10,
-    get scores() {
-        const saved = localStorage.getItem('globalLeaderboard');
-        return saved ? JSON.parse(saved) : [];
-    },
-    set scores(value) {
-        localStorage.setItem('globalLeaderboard', JSON.stringify(value));
-    },
-    
-    addScore: function(nickname, wave, time, level) {
-        const newScore = {
-            nickname,
-            wave,
-            time,
-            level,
-            date: new Date().toISOString()
-        };
-        
-        let scores = this.scores;
-        scores.push(newScore);
-        
-        // Sort by wave descending, then by time descending
-        scores.sort((a, b) => b.wave - a.wave || b.time - a.time);
-        
-        // Remove duplicates and limit entries
-        const uniqueScores = [];
-        const seen = new Set();
-        
-        scores.forEach(score => {
-            const key = `${score.nickname}-${score.wave}-${score.time.toFixed(1)}`;
-            if (!seen.has(key)) {
-                seen.add(key);
-                uniqueScores.push(score);
-            }
-        });
-        
-        this.scores = uniqueScores.slice(0, this.maxEntries);
-        this.display();
-    },
-    
-    display: function(elementId = 'localLeaderboard') {
-        const container = document.getElementById(elementId);
-        if (!container) return;
-        
-        const scores = this.scores;
-        
-        if (scores.length === 0) {
-            container.innerHTML = '<h3>No scores yet!</h3>';
-            return;
-        }
-        
-        let html = '<h3>Global Leaderboard</h3><table style="width:100%; border-collapse:collapse;">';
-        html += '<tr><th>Rank</th><th>Name</th><th>Wave</th><th>Time</th><th>Level</th><th>Date</th></tr>';
-        
-        scores.forEach((score, index) => {
-            const date = new Date(score.date);
-            html += `
-                <tr>
-                    <td>${index + 1}</td>
-                    <td>${score.nickname || 'Anonymous'}</td>
-                    <td>${score.wave}</td>
-                    <td>${score.time.toFixed(1)}s</td>
-                    <td>${score.level}</td>
-                    <td>${date.toLocaleDateString()}</td>
-                </tr>
-            `;
-        });
-        
-        html += '</table>';
-        container.innerHTML = html;
-    }
+  // ── Player ─────────────────────────────────────────────────────────────────
+  PLAYER_SIZE:          20,          // half-width of the ship triangle (px)
+  PLAYER_BASE_SPEED:    300,         // px / second
+  PLAYER_BASE_HEALTH:   200,
+  PLAYER_SHOOT_DELAY:   0.20,        // seconds between shots
+  PLAYER_BULLET_SPEED:  600,         // px / second
+  PLAYER_BASE_DAMAGE:   10,
+
+  // ── Enemies ────────────────────────────────────────────────────────────────
+  BASE_ENEMY_SPEED:     90,          // px / second (normal type)
+  ENEMY_BULLET_SPEED:   360,
+  WAVE_MULTIPLIER:      0.5,
+
+  // ── Camera Shake ───────────────────────────────────────────────────────────
+  SHAKE_MAX:            14,          // maximum pixel displacement
+  SHAKE_DECAY:          6.5,         // exponential decay per second (higher = faster)
+  SHAKE_FREQ:           55,          // Hz of sine oscillation
+
+  // ── Particles ──────────────────────────────────────────────────────────────
+  PARTICLE_FRICTION:    0.88,        // per-frame velocity multiplier
+  PARTICLE_DECAY:       0.94,        // per-frame size multiplier
+
+  // ── Object Pool sizes ──────────────────────────────────────────────────────
+  POOL_BULLETS:         300,
+  POOL_PARTICLES:       500,
+
+  // ── Powerups ───────────────────────────────────────────────────────────────
+  POWERUP_TYPES:   ["health", "xp", "shield", "triple_shot", "speed_boost", "rage"],
+  POWERUP_COLORS: {
+    health:       "#ff6b81",
+    xp:           "#feca57",
+    shield:       "#48dbfb",
+    triple_shot:  "#ff9f43",
+    speed_boost:  "#1dd1a1",
+    rage:         "#ff4757",
+  },
+
+  // ── HUD Colours ────────────────────────────────────────────────────────────
+  HUD_FONT:             "'Rajdhani', monospace",
+  HUD_COLOR_MAIN:       "#e8f0fe",
+  HUD_COLOR_HP_BG:      "rgba(255, 45, 85, 0.35)",
+  HUD_COLOR_HP_FG:      "#2ecc71",
+  HUD_COLOR_XP_BG:      "rgba(0, 229, 255, 0.2)",
+  HUD_COLOR_XP_FG:      "#00e5ff",
+  WALL_COLOR:           "#1a2033",
+  WALL_HP_COLOR:        "#e74c3c",
+  WALL_HP_GOOD_COLOR:   "#2ecc71",
+});
+
+
+// =============================================================================
+// SECTION 2 — UTILITIES
+// Pure, stateless helper functions. No side effects.
+// =============================================================================
+const Utils = {
+
+  /**
+   * Squared Euclidean distance — avoids expensive Math.sqrt in collision loops.
+   * Compare against (r1 + r2)² instead of Math.sqrt(…) < r1 + r2.
+   */
+  distSq(x1, y1, x2, y2) {
+    return (x2 - x1) ** 2 + (y2 - y1) ** 2;
+  },
+
+  /**
+   * O(1) array removal — swaps target with last element, then pops.
+   * Avoids the O(n) shift caused by Array.splice at arbitrary indices.
+   * ORDER IS NOT PRESERVED — acceptable for unordered game-object lists.
+   */
+  removeFast(arr, index) {
+    arr[index] = arr[arr.length - 1];
+    arr.pop();
+  },
+
+  /**
+   * Circle vs Axis-Aligned Rectangle collision.
+   * Projects the closest point on the rect to the circle centre, then
+   * tests against the circle radius.
+   */
+  circleRect(cx, cy, r, rx, ry, rw, rh) {
+    const clampX = Math.max(rx, Math.min(cx, rx + rw));
+    const clampY = Math.max(ry, Math.min(cy, ry + rh));
+    return Utils.distSq(cx, cy, clampX, clampY) <= r * r;
+  },
+
+  /**
+   * Linear interpolation.
+   * Used for smooth camera shake decay and any value transitions.
+   */
+  lerp(a, b, t) {
+    return a + (b - a) * t;
+  },
+
+  /**
+   * Clamp a value between min and max.
+   */
+  clamp(v, min, max) {
+    return Math.max(min, Math.min(max, v));
+  },
 };
 
-// Resize canvas to fit window with proper scaling
-function resizeCanvas() {
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    
-    // Set canvas dimensions
-    canvas.width = width;
-    canvas.height = height;
-    
-    // Calculate scaling factor based on screen size
-    uiScale = Math.max(0.8, Math.min(width / 800, height / 600));
-    document.documentElement.style.setProperty('--ui-scale', uiScale);
-    baseFontSize = Math.max(14, 18 * uiScale); // Minimum font size of 14px
-    
-    // Update CSS variables for mobile controls
-    if (isMobile) {
-        const joystickRect = joystick.getBoundingClientRect();
-        joystickBaseX = joystickRect.left + joystickRect.width / 2;
-        joystickBaseY = joystickRect.top + joystickRect.height / 2;
-    }
-    
-    // Reposition player if canvas resizes during game
-    if (player.alive) {
-        player.x = Math.max(player.size, Math.min(width - player.size, player.x));
-        player.y = Math.max(player.size, Math.min(height - player.size, player.y));
-    }
+
+// =============================================================================
+// SECTION 3 — OBJECT POOL
+// Pre-allocates a reservoir of reusable objects at game start.
+// During gameplay, get() checks the reservoir before allocating new memory.
+// release() returns objects to the reservoir.
+// This eliminates Garbage Collector pauses during intense wave moments.
+// =============================================================================
+class ObjectPool {
+  /**
+   * @param {Function} FactoryClass — constructor for the pooled type
+   * @param {number}   initialSize  — objects to pre-warm on startup
+   */
+  constructor(FactoryClass, initialSize = 100) {
+    this._factory = FactoryClass;
+    // Pre-warm the pool so the first wave costs zero allocations
+    this._pool = Array.from({ length: initialSize }, () => new FactoryClass());
+  }
+
+  /** Retrieve an object. Falls back to `new` if the pool is empty. */
+  get() {
+    return this._pool.length > 0 ? this._pool.pop() : new this._factory();
+  }
+
+  /** Return an object to the pool. Call after marking it inactive. */
+  release(obj) {
+    this._pool.push(obj);
+  }
+
+  /** Current size of the warm pool (useful for debugging). */
+  get size() {
+    return this._pool.length;
+  }
 }
 
-// Game state variables
-let isPaused = false;
-let bullets = [];
-let keys = {};
-let mouseX = canvas.width / 2;
-let mouseY = canvas.height / 2;
-let enemies = [];
-let enemyBullets = [];
-let walls = [];
-let powerups = [];
-let kills = 0;
-let waveCount = 1;
-let gameTime = 0;
-let isMobile = false;
-let particles = [];
-let cameraShake = 0;
-const MAX_SHAKE = 10;
 
-const POWERUP_TYPES = {
-    HEALTH: 'health',
-    XP: 'xp',
-    SHIELD: 'shield',
-    TRIPLE_SHOT: 'triple_shot',
-    SPEED_BOOST: 'speed_boost',
-    RAGE: 'rage'
-};
+// =============================================================================
+// SECTION 4 — POOLABLE ENTITIES
+// Bullet and Particle are designed to be reused via ObjectPool.
+// Constructor sets a minimal "inactive" state.
+// init() acts as a re-constructor when retrieved from the pool.
+// =============================================================================
 
-const activePowerups = {
-    shield: { active: false, endTime: 0 },
-    tripleShot: { active: false, endTime: 0 },
-    speedBoost: { active: false, endTime: 0 },
-    rage: { active: false, endTime: 0 }
-};
+// ── Bullet ──────────────────────────────────────────────────────────────────
+class Bullet {
+  constructor() {
+    this.active = false;
+  }
 
-// Player progression
-const playerStats = {
-    level: 1,
-    xp: 0,
-    xpToNextLevel: 100,
-    upgrades: {
-        speed: 0,
-        health: 0,
-        damage: 0,
-        fireRate: 0,
-        bulletSpeed: 0,
-        critChance: 0,
-        lifesteal: 0
-    }
-};
+  /**
+   * (Re-)initialise a bullet retrieved from the pool.
+   * @param {number}  x, y       — spawn position
+   * @param {number}  dx, dy     — velocity in px/s
+   * @param {number}  size       — radius in px
+   * @param {string}  color      — CSS colour string
+   * @param {number}  damage
+   * @param {boolean} isEnemy    — true for enemy projectiles
+   */
+  init(x, y, dx, dy, size, color, damage, isEnemy) {
+    this.x       = x;
+    this.y       = y;
+    this.dx      = dx;
+    this.dy      = dy;
+    this.size    = size;
+    this.color   = color;
+    this.damage  = damage;
+    this.isEnemy = isEnemy;
+    this.active  = true;
+  }
 
-// Player object
-const player = {
-    x: canvas.width / 2,
-    y: canvas.height / 2,
-    size: 20,
-    color: 'white',
-    baseSpeed: 5,
-    get speed() { 
-        return this.baseSpeed + 
-               playerStats.upgrades.speed * 0.5 + 
-               (activePowerups.speedBoost.active ? 3 : 0); 
-    },
-    health: 200,
-    baseMaxHealth: 200,
-    get maxHealth() { return this.baseMaxHealth + playerStats.upgrades.health * 20; },
-    alive: true,
-    lastShot: 0,
-    baseShootDelay: 200,
-    get shootDelay() { return this.baseShootDelay - playerStats.upgrades.fireRate * 10; },
-    baseDamage: 10,
-    get damage() { return this.baseDamage + playerStats.upgrades.damage * 2; },
-    get bulletSpeed() { return 10 + playerStats.upgrades.bulletSpeed * 0.5; },
-    get critChance() { return playerStats.upgrades.critChance * 0.01; },
-    get lifesteal() { return playerStats.upgrades.lifesteal * 0.01; }
-};
+  /**
+   * Move the bullet forward.
+   * @param {number} dt — elapsed seconds since last frame
+   */
+  update(dt) {
+    this.x += this.dx * dt;
+    this.y += this.dy * dt;
+  }
 
-// Camera shake effect
-function applyCameraShake() {
-    if (cameraShake > 0) {
-        ctx.translate(
-            (Math.random() - 0.5) * cameraShake,
-            (Math.random() - 0.5) * cameraShake
-        );
-        cameraShake *= 0.9; // Decay
-        if (cameraShake < 0.1) cameraShake = 0;
-    }
-}
-
-// Enemy spawning with scaling difficulty
-function spawnEnemy() {
-    const side = Math.floor(Math.random() * 4);
-    let x, y;
-    
-    if (side === 0) { x = 0; y = Math.random() * canvas.height; }
-    else if (side === 1) { x = canvas.width; y = Math.random() * canvas.height; }
-    else if (side === 2) { x = Math.random() * canvas.width; y = 0; }
-    else { x = Math.random() * canvas.width; y = canvas.height; }
-
-    const waveFactor = Math.max(1, Math.log(waveCount + 1)) * 0.5;
-    const enemyType = Math.random() < 0.15 ? 'tank' : 
-                     Math.random() < 0.3 ? 'fast' : 
-                     Math.random() < 0.45 ? 'spread' : 
-                     Math.random() < 0.6 ? 'exploder' : 
-                     'normal';
-    
-    const baseEnemy = {
-        x,
-        y,
-        size: 20 * uiScale, // Scale enemy size
-        lastShot: Date.now(),
-        health: 20 + Math.floor(waveFactor * 10),
-        maxHealth: 20 + Math.floor(waveFactor * 10),
-        damage: 10 + Math.floor(waveFactor * 2)
-    };
-
-    switch(enemyType) {
-        case 'tank':
-            enemies.push({
-                ...baseEnemy,
-                color: 'blue',
-                size: 30 * uiScale,
-                speed: 0.8 + Math.random() * 0.3,
-                health: baseEnemy.health * 2,
-                maxHealth: baseEnemy.maxHealth * 2,
-                shootDelay: 3000,
-                type: 'tank'
-            });
-            break;
-        case 'fast':
-            enemies.push({
-                ...baseEnemy,
-                color: 'yellow',
-                speed: 3 + Math.random() * 0.5,
-                health: baseEnemy.health * 0.7,
-                maxHealth: baseEnemy.maxHealth * 0.7,
-                shootDelay: 1500,
-                type: 'fast'
-            });
-            break;
-        case 'spread':
-            enemies.push({
-                ...baseEnemy,
-                color: 'purple',
-                speed: 1.2 + Math.random() * 0.3,
-                shootDelay: 2500,
-                type: 'spread'
-            });
-            break;
-        case 'exploder':
-            enemies.push({
-                ...baseEnemy,
-                color: 'orange',
-                speed: 1.0 + Math.random() * 0.2,
-                shootDelay: 4000,
-                type: 'exploder'
-            });
-            break;
-        default:
-            enemies.push({
-                ...baseEnemy,
-                color: 'lime',
-                speed: 1.5 + Math.random() * 0.5,
-                shootDelay: 2000 + Math.random() * 1000 - Math.min(1000, waveFactor * 200),
-                type: 'normal'
-            });
-    }
-}
-
-// Wall spawning with scaling
-function spawnWalls() {
-    walls = [];
-    const count = Math.floor(Math.random() * 6) + 5; // 5-10 walls
-
-    for (let i = 0; i < count; i++) {
-        walls.push({
-            x: Math.random() * (canvas.width - 200),
-            y: Math.random() * (canvas.height - 100),
-            width: Math.random() * 100 + 100,
-            height: 20 + Math.random() * 30,
-            health: Math.floor(Math.random() * 5) + 3,
-            maxHealth: 10
-        });
-    }
-}
-
-// Input handlers
-window.addEventListener('keydown', (e) => {
-    keys[e.key.toLowerCase()] = true;
-    if (e.key === 'Escape') isPaused = !isPaused;
-});
-
-window.addEventListener('keyup', (e) => {
-    keys[e.key.toLowerCase()] = false;
-});
-
-window.addEventListener('mousemove', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    mouseX = e.clientX - rect.left;
-    mouseY = e.clientY - rect.top;
-});
-
-window.addEventListener('click', (e) => {
-    if (!player.alive || isPaused) return;
-    if (isMobile && e.target !== shootBtn) return;
-    
-    shoot();
-});
-
-// Mobile touch controls
-let joystickBaseX = 0;
-let joystickBaseY = 0;
-let joystickActive = false;
-let joystickX = 0;
-let joystickY = 0;
-
-function initJoystick() {
-    const rect = joystick.getBoundingClientRect();
-    joystickBaseX = rect.left + rect.width / 2;
-    joystickBaseY = rect.top + rect.height / 2;
-}
-
-joystick.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    joystickActive = true;
-    const touch = e.touches[0];
-    joystickStartX = touch.clientX - joystickBaseX;
-    joystickStartY = touch.clientY - joystickBaseY;
-    initJoystick();
-});
-
-document.addEventListener('touchmove', (e) => {
-    if (!joystickActive) return;
-    e.preventDefault();
-    
-    const touch = e.touches[0];
-    joystickX = touch.clientX - joystickBaseX - joystickStartX;
-    joystickY = touch.clientY - joystickBaseY - joystickStartY;
-    
-    // Limit joystick movement
-    const maxDistance = 40 * uiScale;
-    const distance = Math.sqrt(joystickX * joystickX + joystickY * joystickY);
-    
-    if (distance > maxDistance) {
-        joystickX = (joystickX / distance) * maxDistance;
-        joystickY = (joystickY / distance) * maxDistance;
-    }
-    
-    // Update joystick visual position
-    joystick.style.transform = `translate(${joystickX}px, ${joystickY}px)`;
-});
-
-document.addEventListener('touchend', () => {
-    joystickActive = false;
-    joystickX = 0;
-    joystickY = 0;
-    joystick.style.transform = 'translate(0, 0)';
-});
-
-shootBtn.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    if (!player.alive || isPaused) return;
-    shoot();
-    // Visual feedback
-    shootBtn.style.transform = 'scale(0.9)';
-    setTimeout(() => {
-        shootBtn.style.transform = 'scale(1)';
-    }, 100);
-});
-
-function shoot() {
-    const now = Date.now();
-    if (now - player.lastShot < player.shootDelay) return;
-    
-    let angles = [];
-    
-    // Determine shooting angles
-    if (activePowerups.tripleShot.active) {
-        const mainAngle = isMobile ? 
-            (enemies.length > 0 ? Math.atan2(enemies[0].y - player.y, enemies[0].x - player.x) : Math.random() * Math.PI * 2) :
-            Math.atan2(mouseY - player.y, mouseX - player.x);
-        
-        angles = [mainAngle, mainAngle - 0.3, mainAngle + 0.3];
-    } else {
-        let angle;
-        if (isMobile) {
-            if (enemies.length > 0) {
-                angle = Math.atan2(enemies[0].y - player.y, enemies[0].x - player.x);
-            } else {
-                angle = Math.random() * Math.PI * 2;
-            }
-        } else {
-            angle = Math.atan2(mouseY - player.y, mouseX - player.x);
-        }
-        angles = [angle];
-    }
-    
-    // Create bullets
-    angles.forEach(angle => {
-        const isCrit = Math.random() < player.critChance;
-        const damage = activePowerups.rage.active ? 
-            player.damage * 2 : 
-            (isCrit ? player.damage * 1.5 : player.damage);
-        
-        bullets.push({
-            x: player.x,
-            y: player.y,
-            dx: Math.cos(angle) * player.bulletSpeed,
-            dy: Math.sin(angle) * player.bulletSpeed,
-            size: (isCrit ? 7 : 5) * uiScale,
-            color: isCrit ? 'gold' : 'red',
-            damage
-        });
-    });
-    
-    player.lastShot = now;
-}
-
-// Collision detection with scaling
-function checkCollision(x, y, size) {
-    for (let wall of walls) {
-        if (
-            x + size > wall.x &&
-            x - size < wall.x + wall.width &&
-            y + size > wall.y &&
-            y - size < wall.y + wall.height
-        ) {
-            return true;
-        }
-    }
-    return false;
-}
-
-// Add XP and level up
-function addXP(amount) {
-    playerStats.xp += amount;
-    if (playerStats.xp >= playerStats.xpToNextLevel) {
-        playerStats.level++;
-        playerStats.xp -= playerStats.xpToNextLevel;
-        playerStats.xpToNextLevel = Math.floor(playerStats.xpToNextLevel * 1.2);
-        
-        // Show level up screen
-        showLevelUp();
-    }
-}
-
-// Show level up options
-function showLevelUp() {
-    isPaused = true;
-    levelUpScreen.style.display = 'block';
-    
-    // Create a single handler function to avoid repetition
-    const createUpgradeHandler = (upgradeType, extraAction = null) => {
-        return () => {
-            playerStats.upgrades[upgradeType]++;
-            if (extraAction) extraAction();
-            levelUpScreen.style.display = 'none';
-            
-            requestAnimationFrame(() => {
-                isPaused = false;
-                canvas.focus();
-                
-                if (!player.alive) return;
-                update();
-                draw();
-            });
-        };
-    };
-
-    // Clear existing handlers
-    const clearHandler = (id) => {
-        const el = document.getElementById(id);
-        if (el) {
-            el.onclick = null;
-            if (el._upgradeHandler) {
-                el.removeEventListener('click', el._upgradeHandler);
-            }
-        }
-    };
-
-    // Clear all handlers
-    clearHandler('upgradeSpeed');
-    clearHandler('upgradeHealth');
-    clearHandler('upgradeDamage');
-    clearHandler('upgradeFireRate');
-    clearHandler('upgradeBulletSpeed');
-    clearHandler('upgradeCritChance');
-    clearHandler('upgradeLifesteal');
-
-    // Set up new handlers
-    const setHandler = (id, upgradeType, extraAction = null) => {
-        const el = document.getElementById(id);
-        if (el) {
-            el._upgradeHandler = createUpgradeHandler(upgradeType, extraAction);
-            el.onclick = el._upgradeHandler;
-        }
-    };
-
-    setHandler('upgradeSpeed', 'speed');
-    setHandler('upgradeHealth', 'health', () => {
-        player.health = player.maxHealth;
-    });
-    setHandler('upgradeDamage', 'damage');
-    setHandler('upgradeFireRate', 'fireRate');
-    setHandler('upgradeBulletSpeed', 'bulletSpeed');
-    setHandler('upgradeCritChance', 'critChance');
-    setHandler('upgradeLifesteal', 'lifesteal');
-}
-
-// Enemy Death Particles
-function createParticles(x, y, color, count = 20) {
-    for (let i = 0; i < count; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const speed = Math.random() * 3 + 1;
-        particles.push({
-            x,
-            y,
-            dx: Math.cos(angle) * speed,
-            dy: Math.sin(angle) * speed,
-            size: Math.random() * 4 + 2,
-            color,
-            life: 30 + Math.random() * 30
-        });
-    }
-}
-
-// Update function with optimizations
-function update() {
-    if (!player.alive || isPaused) return;
-    
-    gameTime += 16; // Assuming 60fps (~16ms per frame)
-
-    // Player movement
-    let moveX = 0;
-    let moveY = 0;
-    
-    if (isMobile && joystickActive) {
-        moveX = joystickX / (8 * uiScale); // Scale joystick sensitivity
-        moveY = joystickY / (8 * uiScale);
-    } else {
-        if (keys['w'] || keys['arrowup']) moveY -= player.speed;
-        if (keys['s'] || keys['arrowdown']) moveY += player.speed;
-        if (keys['a'] || keys['arrowleft']) moveX -= player.speed;
-        if (keys['d'] || keys['arrowright']) moveX += player.speed;
-    }
-    
-    // Normalize diagonal movement
-    if (moveX !== 0 && moveY !== 0) {
-        moveX *= 0.7071; // 1/sqrt(2)
-        moveY *= 0.7071;
-    }
-    
-    let nextX = player.x + moveX;
-    let nextY = player.y + moveY;
-
-    if (!checkCollision(nextX, player.y, player.size)) player.x = nextX;
-    if (!checkCollision(player.x, nextY, player.size)) player.y = nextY;
-
-    player.x = Math.max(player.size, Math.min(canvas.width - player.size, player.x));
-    player.y = Math.max(player.size, Math.min(canvas.height - player.size, player.y));
-
-    // Enemy update
-    enemies.forEach(enemy => {
-        const angle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
-        
-        let nextX = enemy.x + Math.cos(angle) * enemy.speed;
-        let nextY = enemy.y + Math.sin(angle) * enemy.speed;
-
-        if (!checkCollision(nextX, nextY, enemy.size)) {
-            enemy.x = nextX;
-            enemy.y = nextY;
-        }
-
-        // Enemy shooting
-        if (Date.now() - enemy.lastShot > enemy.shootDelay && 
-            !checkCollision(enemy.x, enemy.y, enemy.size)) {
-        
-            if (enemy.type === 'spread') {
-                // Spread shooter - fires 3 bullets
-                for (let i = -1; i <= 1; i++) {
-                    const spreadAngle = angle + i * 0.3;
-                    enemyBullets.push({
-                        x: enemy.x,
-                        y: enemy.y,
-                        dx: Math.cos(spreadAngle) * 6,
-                        dy: Math.sin(spreadAngle) * 6,
-                        size: 5 * uiScale,
-                        color: 'purple',
-                        damage: enemy.damage
-                    });
-                }
-            } else {
-                // Normal shooting
-                enemyBullets.push({
-                    x: enemy.x,
-                    y: enemy.y,
-                    dx: Math.cos(angle) * 6,
-                    dy: Math.sin(angle) * 6,
-                    size: 5 * uiScale,
-                    color: enemy.type === 'tank' ? 'blue' : 
-                           enemy.type === 'fast' ? 'yellow' : 
-                           enemy.type === 'exploder' ? 'orange' : 'red',
-                    damage: enemy.damage
-                });
-            }
-            
-            enemy.lastShot = Date.now();
-            
-            if (enemy.type === 'exploder') {
-                // Exploding enemy dies after shooting
-                createParticles(enemy.x, enemy.y, 'orange', 30);
-                enemies.splice(enemies.indexOf(enemy), 1);
-                
-                // Explosion damage to player
-                const distToPlayer = Math.hypot(player.x - enemy.x, player.y - enemy.y);
-                if (distToPlayer < 100 * uiScale) {
-                    const damage = enemy.damage * 2 * (1 - distToPlayer / (100 * uiScale));
-                    player.health -= damage;
-                    cameraShake = MAX_SHAKE * 1.5;
-                }
-            }
-        }
-    });
-
-    // Particle update
-    for (let i = particles.length - 1; i >= 0; i--) {
-        const p = particles[i];
-        p.x += p.dx;
-        p.y += p.dy;
-        p.life--;
-        
-        if (p.life <= 0) {
-            particles.splice(i, 1);
-        }
-    }
-
-    // Enemy bullet update
-    for (let i = enemyBullets.length - 1; i >= 0; i--) {
-        const bullet = enemyBullets[i];
-        bullet.x += bullet.dx;
-        bullet.y += bullet.dy;
-
-        let hit = false;
-
-        // Wall collision
-        for (let j = walls.length - 1; j >= 0; j--) {
-            const wall = walls[j];
-            if (
-                bullet.x > wall.x && bullet.x < wall.x + wall.width &&
-                bullet.y > wall.y && bullet.y < wall.y + wall.height
-            ) {
-                wall.health -= bullet.damage;
-                enemyBullets.splice(i, 1);
-                if (wall.health <= 0) walls.splice(j, 1);
-                hit = true;
-                break;
-            }
-        }
-
-        if (hit) continue;
-
-        // Player collision
-        const dist = Math.hypot(bullet.x - player.x, bullet.y - player.y);
-        if (dist < player.size + bullet.size) {
-            if (!activePowerups.shield.active) {
-                player.health -= bullet.damage;
-            }
-            enemyBullets.splice(i, 1);
-            if (player.health <= 0) player.alive = false;
-            continue;
-        }
-
-        // Boundary check
-        if (
-            bullet.x < 0 || bullet.x > canvas.width ||
-            bullet.y < 0 || bullet.y > canvas.height
-        ) {
-            enemyBullets.splice(i, 1);
-            continue;
-        }
-    }
-
-    // Powerup collection
-    for (let i = powerups.length - 1; i >= 0; i--) {
-        const p = powerups[i];
-        const dist = Math.hypot(player.x - p.x, player.y - p.y);
-        if (dist < player.size + p.size) {
-            switch(p.type) {
-                case POWERUP_TYPES.HEALTH:
-                    player.health = Math.min(player.maxHealth, player.health + 20);
-                    break;
-                case POWERUP_TYPES.XP:
-                    addXP(25);
-                    break;
-                case POWERUP_TYPES.SHIELD:
-                    activePowerups.shield.active = true;
-                    activePowerups.shield.endTime = Date.now() + 10000; // 10 seconds
-                    break;
-                case POWERUP_TYPES.TRIPLE_SHOT:
-                    activePowerups.tripleShot.active = true;
-                    activePowerups.tripleShot.endTime = Date.now() + 8000; // 8 seconds
-                    break;
-                case POWERUP_TYPES.SPEED_BOOST:
-                    activePowerups.speedBoost.active = true;
-                    activePowerups.speedBoost.endTime = Date.now() + 7000; // 7 seconds
-                    break;
-                case POWERUP_TYPES.RAGE:
-                    activePowerups.rage.active = true;
-                    activePowerups.rage.endTime = Date.now() + 5000; // 5 seconds
-                    break;
-            }
-            createParticles(p.x, p.y, p.color);
-            powerups.splice(i, 1);
-        }
-    }
-
-    // Check powerup expiration
-    const now = Date.now();
-    for (const type in activePowerups) {
-        if (activePowerups[type].active && now > activePowerups[type].endTime) {
-            activePowerups[type].active = false;
-        }
-    }
-
-    // Player bullet update
-    for (let i = bullets.length - 1; i >= 0; i--) {
-        const bullet = bullets[i];
-        bullet.x += bullet.dx;
-        bullet.y += bullet.dy;
-
-        let hit = false;
-
-        // Wall collision
-        for (let j = walls.length - 1; j >= 0; j--) {
-            const wall = walls[j];
-            if (
-                bullet.x > wall.x && bullet.x < wall.x + wall.width &&
-                bullet.y > wall.y && bullet.y < wall.y + wall.height
-            ) {
-                wall.health -= bullet.damage;
-                bullets.splice(i, 1);
-                hit = true;
-                if (wall.health <= 0) walls.splice(j, 1);
-                break;
-            }
-        }
-
-        if (hit) continue;
-
-        // Enemy collision
-        for (let j = enemies.length - 1; j >= 0; j--) {
-            const enemy = enemies[j];
-            const dist = Math.hypot(bullet.x - enemy.x, bullet.y - enemy.y);
-
-            if (dist < bullet.size + enemy.size) {
-                enemy.health -= bullet.damage;
-                bullets.splice(i, 1);
-                hit = true;
-
-                // Apply lifesteal
-                if (player.lifesteal > 0) {
-                    player.health = Math.min(player.maxHealth, player.health + bullet.damage * player.lifesteal);
-                }
-
-                if (enemy.health <= 0) {
-                    // Chance to drop powerup
-                    if (Math.random() < 0.2) {
-                        const powerupType = Math.random() < 0.7 ? POWERUP_TYPES.HEALTH : 
-                                          Math.random() < 0.8 ? POWERUP_TYPES.XP :
-                                          Math.random() < 0.85 ? POWERUP_TYPES.SHIELD :
-                                          Math.random() < 0.9 ? POWERUP_TYPES.TRIPLE_SHOT :
-                                          Math.random() < 0.95 ? POWERUP_TYPES.SPEED_BOOST :
-                                          POWERUP_TYPES.RAGE;
-                        
-                        powerups.push({
-                            x: enemy.x,
-                            y: enemy.y,
-                            type: powerupType,
-                            size: 10 * uiScale,
-                            color: powerupType === POWERUP_TYPES.HEALTH ? 'pink' : 
-                                   powerupType === POWERUP_TYPES.XP ? 'yellow' :
-                                   powerupType === POWERUP_TYPES.SHIELD ? 'cyan' :
-                                   powerupType === POWERUP_TYPES.TRIPLE_SHOT ? 'magenta' :
-                                   powerupType === POWERUP_TYPES.SPEED_BOOST ? 'lime' :
-                                   'red'
-                        });
-                    }
-                    
-                    enemies.splice(j, 1);
-    kills++;
-    addXP(10 + Math.floor(Math.log2(waveCount)) * 2);
-
-    // Wave progression - fixed logic
-    if (enemies.length === 0 && kills >= waveCount) {
-        kills = 0;
-        waveCount++;
-        
-        // Calculate enemies for next wave
-        const enemiesToSpawn = Math.min(30, 2 + waveCount);
-        
-        // Spawn new enemies
-        for (let k = 0; k < enemiesToSpawn; k++) {
-            spawnEnemy();
-        }
-        
-        // Every 3 waves, spawn new walls
-        if (waveCount % 3 === 0) {
-            spawnWalls();
-        }
-        
-        cameraShake = 5;
-    }
-}
-                break;
-            }
-        }
-
-        // Boundary check
-        if (!hit && (
-            bullet.x < 0 || bullet.x > canvas.width ||
-            bullet.y < 0 || bullet.y > canvas.height
-        )) {
-            bullets.splice(i, 1);
-        }
-    }
-}
-
-// Drawing functions with scaling
-function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  /** Render the bullet with a neon glow. */
+  draw(ctx) {
     ctx.save();
-    applyCameraShake();
-    
-    // Draw walls
-    walls.forEach(wall => {
-        ctx.fillStyle = '#444';
-        ctx.fillRect(wall.x, wall.y, wall.width, wall.height);
-        
-        // Health bar
-        const healthBarHeight = 5 * uiScale;
-        ctx.fillStyle = 'red';
-        ctx.fillRect(wall.x, wall.y - healthBarHeight - 2, wall.width, healthBarHeight);
-        ctx.fillStyle = 'lime';
-        ctx.fillRect(wall.x, wall.y - healthBarHeight - 2, (wall.health / wall.maxHealth) * wall.width, healthBarHeight);
-    });
+    ctx.shadowBlur  = 14;
+    ctx.shadowColor = this.color;
+    ctx.fillStyle   = this.color;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fill();
+    // Bright core dot for extra crispness
+    ctx.fillStyle = "#ffffff";
+    ctx.globalAlpha = 0.8;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
 
-    // Draw powerups
-    powerups.forEach(p => {
-        ctx.fillStyle = p.color;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fill();
-    });
 
-    // Draw player (as rotated triangle)
-    if (player.alive) {
-        const angle = isMobile && enemies.length > 0 ? 
-            Math.atan2(enemies[0].y - player.y, enemies[0].x - player.x) : 
-            Math.atan2(mouseY - player.y, mouseX - player.x);
-        
-        ctx.save();
-        ctx.translate(player.x, player.y);
-        ctx.rotate(angle);
-        ctx.fillStyle = player.color;
-        ctx.beginPath();
-        ctx.moveTo(20 * uiScale, 0);     // pointy front
-        ctx.lineTo(-10 * uiScale, -10 * uiScale);  // back left
-        ctx.lineTo(-10 * uiScale, 10 * uiScale);   // back right
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
+// ── Particle ─────────────────────────────────────────────────────────────────
+class Particle {
+  constructor() {
+    this.active = false;
+  }
+
+  /**
+   * @param {number} x, y      — spawn position
+   * @param {number} dx, dy    — velocity (arbitrary units, scaled to ~60fps equiv)
+   * @param {string} color
+   * @param {number} size      — starting radius in px
+   * @param {number} life      — lifetime in seconds
+   */
+  init(x, y, dx, dy, color, size, life) {
+    this.x       = x;
+    this.y       = y;
+    this.dx      = dx;
+    this.dy      = dy;
+    this.color   = color;
+    this.size    = size;
+    this.life    = life;
+    this.maxLife = life;
+    this.active  = true;
+  }
+
+  /**
+   * Simulate friction and scale-down as the particle fades.
+   * Velocity is kept in "pixel/frame units", scaled to a 60 fps equivalent
+   * so the visual feel stays consistent regardless of refresh rate.
+   */
+  update(dt) {
+    // Scale frame-relative velocity by the actual elapsed time
+    this.x   += this.dx * dt * 60;
+    this.y   += this.dy * dt * 60;
+    // Friction slows each component multiplicatively
+    this.dx  *= CONFIG.PARTICLE_FRICTION;
+    this.dy  *= CONFIG.PARTICLE_FRICTION;
+    // Particle shrinks as it ages
+    this.size = Math.max(0, this.size * CONFIG.PARTICLE_DECAY);
+    this.life -= dt;
+  }
+
+  /** Alpha driven by remaining lifetime for a smooth fade. */
+  draw(ctx) {
+    const alpha = Math.max(0, this.life / this.maxLife);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.shadowBlur  = 6;
+    ctx.shadowColor = this.color;
+    ctx.fillStyle   = this.color;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, Math.max(0.1, this.size), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+
+// =============================================================================
+// SECTION 5 — PLAYER
+// Encapsulates movement, shooting, upgrades, buffs, XP, and drawing.
+// All tunable values are read from CONFIG; all upgrades are additive offsets.
+// =============================================================================
+class Player {
+  /**
+   * @param {Game} game — back-reference to the owning Game instance
+   */
+  constructor(game) {
+    this.game = game;
+    this.reset();
+  }
+
+  /** Called at game start and restart to return to a clean state. */
+  reset() {
+    this.x      = this.game.width  / 2;
+    this.y      = this.game.height / 2;
+    this.size   = CONFIG.PLAYER_SIZE;
+    this.color  = "#ffffff";
+    this.alive  = true;
+    this.health = CONFIG.PLAYER_BASE_HEALTH;
+
+    // RPG progression
+    this.stats = { level: 1, xp: 0, xpToNext: 100 };
+
+    // Persistent level-up upgrades (additive stacking)
+    this.upgrades = {
+      speed: 0, health: 0, damage: 0,
+      fireRate: 0, bulletSpeed: 0, critChance: 0, lifesteal: 0,
+    };
+
+    // Timed buff durations in seconds (countdown to 0)
+    this.buffs = {
+      shield: 0, tripleShot: 0, speedBoost: 0, rage: 0,
+    };
+
+    this._lastShot = 0; // gameTime stamp of last fired bullet
+  }
+
+  // ── Derived stats (read-only getters) ──────────────────────────────────────
+
+  get maxHealth()  { return CONFIG.PLAYER_BASE_HEALTH + this.upgrades.health * 20; }
+  get speed()      { return CONFIG.PLAYER_BASE_SPEED  + (this.upgrades.speed   * 30) + (this.buffs.speedBoost > 0 ? 150 : 0); }
+  get damage()     { return CONFIG.PLAYER_BASE_DAMAGE + (this.upgrades.damage   * 2); }
+  get shootDelay() { return Math.max(0.05, CONFIG.PLAYER_SHOOT_DELAY - (this.upgrades.fireRate * 0.02)); }
+  get bulletSpd()  { return CONFIG.PLAYER_BULLET_SPEED + (this.upgrades.bulletSpeed * 30); }
+  get critChance() { return this.upgrades.critChance * 0.05; }   // 5 % per upgrade point
+  get lifesteal()  { return this.upgrades.lifesteal  * 0.05; }   // 5 % per upgrade point
+
+  /**
+   * Main update — runs every frame while the player is alive.
+   * @param {number}       dt    — seconds since last frame
+   * @param {InputManager} input — current input snapshot
+   */
+  update(dt, input) {
+    if (!this.alive) return;
+
+    // ── Count down buff timers ──────────────────────────────────────────────
+    for (const key in this.buffs) {
+      if (this.buffs[key] > 0) this.buffs[key] = Math.max(0, this.buffs[key] - dt);
     }
 
-    // Draw bullets
-    bullets.forEach(bullet => {
-        ctx.fillStyle = bullet.color;
-        ctx.beginPath();
-        ctx.arc(bullet.x, bullet.y, bullet.size, 0, Math.PI * 2);
-        ctx.fill();
-    });
+    // ── Directional input (keyboard or joystick) ────────────────────────────
+    let dx = 0, dy = 0;
 
-    // Draw particles
-    particles.forEach(p => {
-        ctx.globalAlpha = p.life / 60; // Fade out
-        ctx.fillStyle = p.color;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size * uiScale, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-    });
+    if (input.joystickActive) {
+      // Joystick value ±40 px from centre → normalise to unit vector
+      dx = input.joystickX / 40;
+      dy = input.joystickY / 40;
+    } else {
+      if (input.keys["w"] || input.keys["arrowup"])    dy -= 1;
+      if (input.keys["s"] || input.keys["arrowdown"])  dy += 1;
+      if (input.keys["a"] || input.keys["arrowleft"])  dx -= 1;
+      if (input.keys["d"] || input.keys["arrowright"]) dx += 1;
+    }
 
-    // Draw enemies
-    enemies.forEach(enemy => {
-        ctx.fillStyle = enemy.color;
-        ctx.beginPath();
-        ctx.arc(enemy.x, enemy.y, enemy.size, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Enemy health bar
-        const healthBarWidth = 40 * uiScale;
-        const healthBarHeight = 5 * uiScale;
-        ctx.fillStyle = 'red';
-        ctx.fillRect(enemy.x - healthBarWidth/2, enemy.y - enemy.size - healthBarHeight - 2, 
-                    healthBarWidth, healthBarHeight);
-        ctx.fillStyle = 'lime';
-        ctx.fillRect(enemy.x - healthBarWidth/2, enemy.y - enemy.size - healthBarHeight - 2, 
-                    (enemy.health / enemy.maxHealth) * healthBarWidth, healthBarHeight);
-    });
+    // Normalise diagonal movement so we don't move ~41 % faster diagonally
+    const len = Math.hypot(dx, dy);
+    if (len > 0) { dx /= len; dy /= len; }
 
-    // Draw enemy bullets
-    enemyBullets.forEach(bullet => {
-        ctx.fillStyle = bullet.color;
-        ctx.beginPath();
-        ctx.arc(bullet.x, bullet.y, bullet.size, 0, Math.PI * 2);
-        ctx.fill();
-    });
+    // ── Attempt movement, wall-check each axis independently ───────────────
+    const nx = this.x + dx * this.speed * dt;
+    const ny = this.y + dy * this.speed * dt;
 
-    // Draw UI with scaling
-const uiMargin = 20 * uiScale;
-const uiLineHeight = 30 * uiScale;
-const healthBarWidth = 200 * uiScale;
-const healthBarHeight = 20 * uiScale;
+    if (!this.game.checkWallCollision(nx, this.y, this.size)) this.x = nx;
+    if (!this.game.checkWallCollision(this.x, ny, this.size)) this.y = ny;
 
-// Set font properties
-ctx.font = `${baseFontSize}px Arial`;
-ctx.fillStyle = 'white';
-ctx.textBaseline = 'top'; // Ensure consistent text alignment
+    // Hard boundary clamp
+    this.x = Utils.clamp(this.x, this.size, this.game.width  - this.size);
+    this.y = Utils.clamp(this.y, this.size, this.game.height - this.size);
 
-// Player health bar (move it down slightly to prevent overlap)
-const healthBarY = uiMargin + uiLineHeight;
-ctx.fillStyle = 'red';
-ctx.fillRect(uiMargin, healthBarY, healthBarWidth, healthBarHeight);
-ctx.fillStyle = 'lime';
-ctx.fillRect(uiMargin, healthBarY, (player.health / player.maxHealth) * healthBarWidth, healthBarHeight);
-ctx.strokeStyle = 'white';
-ctx.strokeRect(uiMargin, healthBarY, healthBarWidth, healthBarHeight);
+    // ── Shooting ────────────────────────────────────────────────────────────
+    if (input.isShooting && (this.game.gameTime - this._lastShot) >= this.shootDelay) {
+      this._shoot(input);
+    }
+  }
 
-// Game info (positioned above health bar)
-let currentY = uiMargin;
-ctx.fillText(`Wave: ${waveCount} | Kills: ${kills}/${waveCount} | Enemies: ${enemies.length}`, 
-            uiMargin, currentY);
-currentY += uiLineHeight;
-ctx.fillText(`Health: ${Math.floor(player.health)}/${player.maxHealth}`, uiMargin, currentY);
-currentY += uiLineHeight;
-ctx.fillText(`Time: ${(gameTime/1000).toFixed(1)}s`, uiMargin, currentY);
-currentY += uiLineHeight;
-ctx.fillText(`Level: ${playerStats.level} (${playerStats.xp}/${playerStats.xpToNextLevel} XP)`, 
-            uiMargin, currentY);
-                
-    // Active powerups
-    let powerupY = 180 * uiScale;
-    for (const type in activePowerups) {
-        if (activePowerups[type].active) {
-            const timeLeft = (activePowerups[type].endTime - Date.now()) / 1000;
-            if (timeLeft > 0) {
-                ctx.fillText(`${type.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}: ${timeLeft.toFixed(1)}s`, 
-                            uiMargin, powerupY);
-                powerupY += uiLineHeight;
-            }
+  /**
+   * Fire one (or three) bullets toward the cursor / nearest enemy.
+   * @param {InputManager} input
+   */
+  _shoot(input) {
+    this._lastShot = this.game.gameTime;
+
+    // Mobile: auto-aim at closest enemy; desktop: aim at mouse cursor
+    const angle = input.isMobile && this.game.enemies.length > 0
+      ? Math.atan2(this.game.enemies[0].y - this.y, this.game.enemies[0].x - this.x)
+      : Math.atan2(input.mouseY - this.y, input.mouseX - this.x);
+
+    // Triple-shot buff adds two spread shots
+    const angles = (this.buffs.tripleShot > 0)
+      ? [angle, angle - 0.2, angle + 0.2]
+      : [angle];
+
+    for (const ang of angles) {
+      const isCrit  = Math.random() < this.critChance;
+      const isRage  = this.buffs.rage > 0;
+      const dmg     = (isRage || isCrit) ? this.damage * 2 : this.damage;
+      const color   = isCrit  ? "#f1c40f"
+                    : isRage  ? "#ff4757"
+                    : "#e74c3c";
+      const size    = (isCrit ? 7 : 5) * this.game.uiScale;
+
+      const b = this.game.bulletPool.get();
+      b.init(
+        this.x, this.y,
+        Math.cos(ang) * this.bulletSpd,
+        Math.sin(ang) * this.bulletSpd,
+        size, color, dmg, false
+      );
+      this.game.bullets.push(b);
+    }
+  }
+
+  /**
+   * Award XP, triggering a level-up if the threshold is reached.
+   * @param {number} amount
+   */
+  addXP(amount) {
+    this.stats.xp += amount;
+    if (this.stats.xp >= this.stats.xpToNext) {
+      this.stats.level++;
+      this.stats.xp      -= this.stats.xpToNext;
+      this.stats.xpToNext = Math.floor(this.stats.xpToNext * 1.2);
+      this.game.ui.showLevelUp();
+    }
+  }
+
+  /**
+   * Render the player ship as a glowing triangle.
+   * Rotates to face the cursor / nearest enemy.
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {InputManager}            input
+   */
+  draw(ctx, input) {
+    if (!this.alive) return;
+
+    const angle = input.isMobile && this.game.enemies.length > 0
+      ? Math.atan2(this.game.enemies[0].y - this.y, this.game.enemies[0].x - this.x)
+      : Math.atan2(input.mouseY - this.y, input.mouseX - this.x);
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(angle);
+
+    // ── Shield aura ────────────────────────────────────────────────────────
+    if (this.buffs.shield > 0) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(72, 219, 251, 0.65)";
+      ctx.lineWidth   = 3;
+      ctx.shadowBlur  = 20;
+      ctx.shadowColor = "#48dbfb";
+      ctx.beginPath();
+      ctx.arc(0, 0, this.size + 12, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ── Ship triangle ──────────────────────────────────────────────────────
+    const s = this.size;
+    ctx.shadowBlur  = 20;
+    ctx.shadowColor = this.color;
+    ctx.fillStyle   = this.color;
+    ctx.beginPath();
+    ctx.moveTo(s,       0);          // nose (pointing right before rotation)
+    ctx.lineTo(-s * 0.6,  s * 0.55); // bottom-left
+    ctx.lineTo(-s * 0.3,  0);        // engine recess
+    ctx.lineTo(-s * 0.6, -s * 0.55); // top-left
+    ctx.closePath();
+    ctx.fill();
+
+    // Thruster flame (animated with gameTime)
+    const flicker = 0.8 + Math.sin(this.game.gameTime * 40) * 0.2;
+    ctx.shadowColor = "#ff9f43";
+    ctx.shadowBlur  = 12 * flicker;
+    ctx.fillStyle   = `rgba(255, 159, 67, ${0.75 * flicker})`;
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.3,  s * 0.25);
+    ctx.lineTo(-s * 0.9 * flicker, 0);
+    ctx.lineTo(-s * 0.3, -s * 0.25);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+  }
+}
+
+
+// =============================================================================
+// SECTION 6 — ENEMY
+// Five distinct archetypes with unique stats, speeds, and attack patterns.
+// =============================================================================
+class Enemy {
+  /**
+   * @param {Game}   game
+   * @param {number} x, y        — spawn position
+   * @param {string} type        — "normal" | "tank" | "fast" | "spread" | "exploder"
+   * @param {number} waveFactor  — difficulty scalar derived from current wave
+   */
+  constructor(game, x, y, type, waveFactor) {
+    this.game = game;
+    this.x    = x;
+    this.y    = y;
+    this.type = type;
+
+    const baseHp    = 20 + Math.floor(waveFactor * 10);
+    this.damage     = 10 + Math.floor(waveFactor * 2);
+    this._lastShot  = game.gameTime;
+
+    // Per-type stat overrides
+    switch (type) {
+      case "tank":
+        this.color     = "#3498db";
+        this.size      = 30 * game.uiScale;
+        this.speed     = 40;
+        this.hp        = baseHp * 2;
+        this.shootDelay = 3.0;
+        break;
+      case "fast":
+        this.color     = "#f1c40f";
+        this.size      = 16 * game.uiScale;
+        this.speed     = 185;
+        this.hp        = baseHp * 0.6;
+        this.shootDelay = 1.5;
+        break;
+      case "spread":
+        this.color     = "#9b59b6";
+        this.size      = 20 * game.uiScale;
+        this.speed     = 70;
+        this.hp        = baseHp;
+        this.shootDelay = 2.5;
+        break;
+      case "exploder":
+        this.color     = "#e67e22";
+        this.size      = 22 * game.uiScale;
+        this.speed     = 105;
+        this.hp        = baseHp;
+        this.shootDelay = 4.0;
+        break;
+      default: // "normal"
+        this.color     = "#2ecc71";
+        this.size      = 20 * game.uiScale;
+        this.speed     = CONFIG.BASE_ENEMY_SPEED;
+        this.hp        = baseHp;
+        this.shootDelay = 2.0;
+    }
+
+    this.maxHp = this.hp;
+  }
+
+  /**
+   * Move toward the player, checking for wall obstruction, then shoot.
+   * @param {number} dt     — seconds since last frame
+   * @param {Player} player
+   */
+  update(dt, player) {
+    const angle = Math.atan2(player.y - this.y, player.x - this.x);
+    const nx    = this.x + Math.cos(angle) * this.speed * dt;
+    const ny    = this.y + Math.sin(angle) * this.speed * dt;
+
+    // Only move if the target cell is wall-free
+    if (!this.game.checkWallCollision(nx, ny, this.size)) {
+      this.x = nx;
+      this.y = ny;
+    }
+
+    // ── Shooting / special behaviour ───────────────────────────────────────
+    const timeSinceShot = this.game.gameTime - this._lastShot;
+    if (timeSinceShot >= this.shootDelay && !this.game.checkWallCollision(this.x, this.y, this.size)) {
+      this._lastShot = this.game.gameTime;
+
+      if (this.type === "exploder") {
+        // Suicide explosion: kills itself, damages nearby player
+        this.game.spawnParticles(this.x, this.y, this.color, 35);
+        this.hp = 0;
+
+        const blastRadSq = (105 * this.game.uiScale) ** 2;
+        const dSq        = Utils.distSq(this.x, this.y, player.x, player.y);
+        if (dSq < blastRadSq) {
+          // Damage falls off linearly with distance
+          const falloff = 1 - (Math.sqrt(dSq) / Math.sqrt(blastRadSq));
+          player.health -= this.damage * 2 * falloff;
+          this.game.cameraShake = Math.max(this.game.cameraShake, CONFIG.SHAKE_MAX * 1.5);
         }
+        return;
+      }
+
+      // Spread shoots 3 bullets in a fan; others shoot straight
+      const angles = (this.type === "spread")
+        ? [angle, angle - 0.28, angle + 0.28]
+        : [angle];
+
+      for (const ang of angles) {
+        const b = this.game.bulletPool.get();
+        b.init(
+          this.x, this.y,
+          Math.cos(ang) * CONFIG.ENEMY_BULLET_SPEED,
+          Math.sin(ang) * CONFIG.ENEMY_BULLET_SPEED,
+          5 * this.game.uiScale,
+          this.color,
+          this.damage,
+          true   // isEnemy
+        );
+        this.game.bullets.push(b);
+      }
+    }
+  }
+
+  /**
+   * Render the enemy as a glowing circle with a health bar.
+   * @param {CanvasRenderingContext2D} ctx
+   */
+  draw(ctx) {
+    ctx.save();
+    ctx.shadowBlur  = 12;
+    ctx.shadowColor = this.color;
+    ctx.fillStyle   = this.color;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // ── Health bar above the enemy ─────────────────────────────────────────
+    const barW = 44 * this.game.uiScale;
+    const barH = 5  * this.game.uiScale;
+    const barX = this.x - barW / 2;
+    const barY = this.y - this.size - barH - 6;
+    const hpRatio = Utils.clamp(this.hp / this.maxHp, 0, 1);
+
+    ctx.fillStyle = CONFIG.WALL_HP_COLOR;
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.fillStyle = CONFIG.WALL_HP_GOOD_COLOR;
+    ctx.fillRect(barX, barY, barW * hpRatio, barH);
+  }
+}
+
+
+// =============================================================================
+// SECTION 7 — INPUT MANAGER
+// Centralises all input sources (keyboard, mouse, touch joystick).
+// The game loop reads a snapshot each frame; it does not subscribe to events.
+// =============================================================================
+class InputManager {
+  constructor() {
+    // Keyboard state — key names lowercased
+    this.keys = {};
+
+    // Mouse / cursor
+    this.mouseX    = 0;
+    this.mouseY    = 0;
+    this.isShooting = false;
+
+    // Touch joystick
+    this.joystickActive = false;
+    this.joystickX      = 0;
+    this.joystickY      = 0;
+
+    // Detect mobile once at init
+    this.isMobile = /Mobi|Android/i.test(navigator.userAgent);
+
+    this._bindListeners();
+  }
+
+  _bindListeners() {
+    const canvas   = document.getElementById("gameCanvas");
+    const joy      = document.getElementById("joystick");
+    const knob     = joy.querySelector(".joystick__knob");
+    const shootBtn = document.getElementById("shootBtn");
+
+    // ── Keyboard ────────────────────────────────────────────────────────────
+    window.addEventListener("keydown", e => {
+      this.keys[e.key.toLowerCase()] = true;
+    });
+    window.addEventListener("keyup", e => {
+      this.keys[e.key.toLowerCase()] = false;
+    });
+
+    // ── Mouse ───────────────────────────────────────────────────────────────
+    window.addEventListener("mousemove", e => {
+      const rect   = canvas.getBoundingClientRect();
+      this.mouseX  = e.clientX - rect.left;
+      this.mouseY  = e.clientY - rect.top;
+    });
+    window.addEventListener("mousedown", ()  => { this.isShooting = true;  });
+    window.addEventListener("mouseup",   ()  => { this.isShooting = false; });
+
+    // ── Touch joystick ──────────────────────────────────────────────────────
+    let jBaseX = 0, jBaseY = 0;
+
+    joy.addEventListener("touchstart", e => {
+      e.preventDefault();
+      this.joystickActive = true;
+      joy.classList.add("joystick--active");
+
+      const r  = joy.getBoundingClientRect();
+      jBaseX   = r.left + r.width  / 2;
+      jBaseY   = r.top  + r.height / 2;
+      this._updateJoystick(e.touches[0], jBaseX, jBaseY, knob);
+    });
+
+    document.addEventListener("touchmove", e => {
+      if (!this.joystickActive) return;
+      e.preventDefault();
+      this._updateJoystick(e.touches[0], jBaseX, jBaseY, knob);
+    }, { passive: false });
+
+    document.addEventListener("touchend", () => {
+      this.joystickActive = false;
+      this.joystickX = 0;
+      this.joystickY = 0;
+      knob.style.transform = "translate(-50%, -50%)";
+      joy.classList.remove("joystick--active");
+    });
+
+    // ── Shoot button (mobile) ───────────────────────────────────────────────
+    shootBtn.addEventListener("touchstart", e => {
+      e.preventDefault();
+      this.isShooting = true;
+    });
+    shootBtn.addEventListener("touchend", e => {
+      e.preventDefault();
+      this.isShooting = false;
+    });
+  }
+
+  /**
+   * Update the visual knob position and write dx/dy to the input state.
+   */
+  _updateJoystick(touch, baseX, baseY, knob) {
+    const maxRadius = 40;
+    let   dx = touch.clientX - baseX;
+    let   dy = touch.clientY - baseY;
+    const dist = Math.hypot(dx, dy);
+
+    if (dist > maxRadius) {
+      dx = (dx / dist) * maxRadius;
+      dy = (dy / dist) * maxRadius;
     }
 
-    // Pause screen
-    if (isPaused && levelUpScreen.style.display === 'none') {
-        ctx.fillStyle = 'rgba(0,0,0,0.7)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = 'white';
-        ctx.font = `${48 * uiScale}px Arial`;
-        ctx.textAlign = 'center';
-        ctx.fillText('Paused', canvas.width / 2, canvas.height / 2);
-        ctx.font = `${24 * uiScale}px Arial`;
-        ctx.fillText('Press ESC to resume', canvas.width / 2, canvas.height / 2 + 50 * uiScale);
+    this.joystickX = dx;
+    this.joystickY = dy;
+    knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+  }
+}
+
+
+// =============================================================================
+// SECTION 8 — UI MANAGER
+// Owns all DOM interactions: start screen, level-up dialog, leaderboard, HUD.
+// HUD is drawn on the canvas each frame; everything else is HTML/CSS overlays.
+// =============================================================================
+class UIManager {
+  /**
+   * @param {Game} game
+   */
+  constructor(game) {
+    this.game = game;
+
+    // Cache DOM references once — avoids repeated querySelector
+    this._el = {
+      startScreen:  document.getElementById("startScreen"),
+      levelUp:      document.getElementById("levelUpScreen"),
+      restartBtn:   document.getElementById("restartBtn"),
+      mobileUI:     document.getElementById("mobileControls"),
+      leaderboard:  document.getElementById("localLeaderboard"),
+    };
+
+    this._bindUI();
+    this._renderLeaderboard();
+  }
+
+  _bindUI() {
+    // ── Start button ────────────────────────────────────────────────────────
+    document.getElementById("startBtn").addEventListener("click", () => {
+      const raw  = document.getElementById("nicknameInput").value.trim();
+      const name = raw.length > 0 ? raw : "Ghost";
+      localStorage.setItem("ks_nickname", name);
+
+      this._el.startScreen.classList.add("hidden");
+      if (this.game.input.isMobile) {
+        this._el.mobileUI.style.display = "block";
+      }
+      this.game.start();
+    });
+
+    // ── Restart button ───────────────────────────────────────────────────────
+    document.getElementById("restartBtn").addEventListener("click", () => {
+      this._el.restartBtn.classList.add("hidden");
+      this.game.start();
+    });
+
+    // ── Upgrade buttons ─────────────────────────────────────────────────────
+    document.querySelectorAll(".btn--upgrade").forEach(btn => {
+      btn.addEventListener("click", e => {
+        const type = e.currentTarget.dataset.type;
+        if (!type || !(type in this.game.player.upgrades)) return;
+
+        this.game.player.upgrades[type]++;
+        // Health upgrades also refill to the new maximum
+        if (type === "health") {
+          this.game.player.health = this.game.player.maxHealth;
+        }
+
+        this._el.levelUp.classList.add("hidden");
+        this.game.isPaused = false;
+        // Reset lastTime so a large dt spike doesn't happen after the pause
+        this.game.lastTime = performance.now();
+      });
+    });
+  }
+
+  /** Pause the game and reveal the level-up card. */
+  showLevelUp() {
+    this.game.isPaused = true;
+    this._el.levelUp.classList.remove("hidden");
+  }
+
+  /** Record the score, refresh the leaderboard, show the restart button. */
+  showGameOver() {
+    const name  = localStorage.getItem("ks_nickname") || "Ghost";
+    this._saveScore(name, this.game.wave, this.game.gameTime, this.game.player.stats.level);
+    this._renderLeaderboard();
+    this._el.restartBtn.classList.remove("hidden");
+  }
+
+  // ── Leaderboard persistence ─────────────────────────────────────────────
+
+  _saveScore(name, wave, time, level) {
+    const stored = JSON.parse(localStorage.getItem("ks_scores") || "[]");
+    stored.push({ name, wave, time: +time.toFixed(1), level, date: new Date().toLocaleDateString() });
+
+    // Sort by wave (desc) then time (desc) as tiebreaker
+    stored.sort((a, b) => b.wave - a.wave || b.time - a.time);
+
+    // Deduplicate identical entries (same play doesn't double-save on reload)
+    const seen   = new Set();
+    const unique = stored.filter(s => {
+      const key = `${s.name}|${s.wave}|${s.time}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    localStorage.setItem("ks_scores", JSON.stringify(unique.slice(0, 10)));
+  }
+
+  _renderLeaderboard() {
+    const scores = JSON.parse(localStorage.getItem("ks_scores") || "[]");
+    if (scores.length === 0) {
+      this._el.leaderboard.innerHTML = `<p class="leaderboard__empty">No records yet. Be the first.</p>`;
+      return;
     }
 
-    // Game over screen
-    if (!player.alive) {
-        ctx.fillStyle = 'rgba(0,0,0,0.7)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = 'white';
-        ctx.font = `${48 * uiScale}px Arial`;
-        ctx.textAlign = 'center';
-        ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2 - 80 * uiScale);
-        ctx.font = `${24 * uiScale}px Arial`;
-        ctx.fillText(`Reached Wave ${waveCount}`, canvas.width / 2, canvas.height / 2 - 30 * uiScale);
-        ctx.fillText(`Survived for ${(gameTime/1000).toFixed(1)} seconds`, canvas.width / 2, canvas.height / 2 + 10 * uiScale);
-        ctx.fillText(`Level ${playerStats.level}`, canvas.width / 2, canvas.height / 2 + 50 * uiScale);
-        
-        // Add to leaderboard
-        const nickname = localStorage.getItem('playerNickname') || 'Player';
-        leaderboard.addScore(nickname, waveCount, gameTime/1000, playerStats.level);
-        
-        restartBtn.style.display = 'block';
+    const rows = scores.map((s, i) =>
+      `<tr>
+        <td>${i + 1}</td>
+        <td>${this._esc(s.name)}</td>
+        <td>${s.wave}</td>
+        <td>${s.time}s</td>
+        <td>${s.level}</td>
+      </tr>`
+    ).join("");
+
+    this._el.leaderboard.innerHTML = `
+      <table>
+        <thead><tr><th>#</th><th>NAME</th><th>WAVE</th><th>TIME</th><th>LVL</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  /** Minimal HTML-entity escaping to prevent XSS from nickname input. */
+  _esc(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  // ── In-canvas HUD ──────────────────────────────────────────────────────────
+
+  /**
+   * Renders all heads-up display elements directly onto the game canvas.
+   * Called once per frame from Game.draw().
+   * @param {CanvasRenderingContext2D} ctx
+   */
+  drawHUD(ctx) {
+    const g   = this.game;
+    const p   = g.player;
+    const s   = g.uiScale;
+    const m   = 20 * s;                // left/top margin
+    const lh  = 28 * s;               // line height
+
+    ctx.save();
+    ctx.textBaseline = "top";
+
+    // ── Wave / kill counter (top-left) ─────────────────────────────────────
+    ctx.font      = `700 ${Math.max(13, 16 * s)}px ${CONFIG.HUD_FONT}`;
+    ctx.fillStyle = CONFIG.HUD_COLOR_MAIN;
+    ctx.shadowBlur  = 6;
+    ctx.shadowColor = "rgba(0,229,255,0.5)";
+    ctx.fillText(`WAVE ${g.wave}   KILLS ${g.kills}/${g.wave}   ENEMIES ${g.enemies.length}`, m, m);
+    ctx.shadowBlur  = 0;
+
+    // ── Time & Level (below wave line) ─────────────────────────────────────
+    ctx.font      = `600 ${Math.max(12, 14 * s)}px ${CONFIG.HUD_FONT}`;
+    ctx.fillStyle = "rgba(232,240,254,0.7)";
+    ctx.fillText(`Time: ${g.gameTime.toFixed(1)}s   Level ${p.stats.level}`, m, m + lh);
+
+    // ── Health bar ─────────────────────────────────────────────────────────
+    const hbY  = m + lh * 2 + 6;
+    const hbW  = 180 * s;
+    const hbH  = 10  * s;
+    const hpR  = Utils.clamp(p.health / p.maxHealth, 0, 1);
+
+    // Background track
+    ctx.fillStyle = CONFIG.HUD_COLOR_HP_BG;
+    this._roundRect(ctx, m, hbY, hbW, hbH, 4);
+
+    // Filled segment
+    ctx.fillStyle = CONFIG.HUD_COLOR_HP_FG;
+    if (hpR > 0) this._roundRect(ctx, m, hbY, hbW * hpR, hbH, 4);
+
+    // HP label
+    ctx.font      = `700 ${Math.max(11, 13 * s)}px ${CONFIG.HUD_FONT}`;
+    ctx.fillStyle = CONFIG.HUD_COLOR_MAIN;
+    ctx.fillText(`HP  ${Math.ceil(p.health)} / ${p.maxHealth}`, m, hbY + hbH + 5);
+
+    // ── XP bar ──────────────────────────────────────────────────────────────
+    const xbY  = hbY + hbH + 26 * s;
+    const xbW  = 140 * s;
+    const xbH  = 6   * s;
+    const xpR  = Utils.clamp(p.stats.xp / p.stats.xpToNext, 0, 1);
+
+    ctx.fillStyle = CONFIG.HUD_COLOR_XP_BG;
+    this._roundRect(ctx, m, xbY, xbW, xbH, 3);
+
+    ctx.fillStyle = CONFIG.HUD_COLOR_XP_FG;
+    if (xpR > 0) this._roundRect(ctx, m, xbY, xbW * xpR, xbH, 3);
+
+    ctx.font      = `600 ${Math.max(10, 12 * s)}px ${CONFIG.HUD_FONT}`;
+    ctx.fillStyle = "rgba(0,229,255,0.8)";
+    ctx.fillText(`XP  ${p.stats.xp} / ${p.stats.xpToNext}`, m, xbY + xbH + 4);
+
+    // ── Active buff pills ──────────────────────────────────────────────────
+    let buffY = xbY + xbH + 28 * s;
+    for (const key in p.buffs) {
+      if (p.buffs[key] > 0) {
+        const col  = CONFIG.POWERUP_COLORS[key] || "#fff";
+        const pill = `${key.toUpperCase()}  ${p.buffs[key].toFixed(1)}s`;
+
+        ctx.font         = `700 ${Math.max(11, 13 * s)}px ${CONFIG.HUD_FONT}`;
+        ctx.fillStyle    = col;
+        ctx.shadowBlur   = 8;
+        ctx.shadowColor  = col;
+        ctx.fillText(pill, m, buffY);
+        ctx.shadowBlur   = 0;
+        buffY           += lh;
+      }
+    }
+
+    // ── Pause indicator ────────────────────────────────────────────────────
+    if (g.isPaused) {
+      ctx.font      = `900 ${Math.max(18, 28 * s)}px ${CONFIG.HUD_FONT}`;
+      ctx.fillStyle = "rgba(0,229,255,0.6)";
+      ctx.textAlign = "center";
+      ctx.fillText("PAUSED", g.width / 2, m);
+      ctx.textAlign = "left";
+    }
+
+    // ── Game-over overlay ──────────────────────────────────────────────────
+    if (!p.alive) {
+      ctx.fillStyle = "rgba(0,0,0,0.78)";
+      ctx.fillRect(0, 0, g.width, g.height);
+
+      ctx.textAlign   = "center";
+      ctx.fillStyle   = "#ff2d55";
+      ctx.shadowBlur  = 30;
+      ctx.shadowColor = "rgba(255,45,85,0.7)";
+      ctx.font        = `900 ${Math.max(28, 52 * s)}px ${CONFIG.HUD_FONT}`;
+      ctx.fillText("MISSION FAILED", g.width / 2, g.height / 2 - 60 * s);
+
+      ctx.shadowBlur  = 0;
+      ctx.fillStyle   = CONFIG.HUD_COLOR_MAIN;
+      ctx.font        = `600 ${Math.max(15, 22 * s)}px ${CONFIG.HUD_FONT}`;
+      ctx.fillText(`Wave reached: ${g.wave}   Time: ${g.gameTime.toFixed(1)}s`, g.width / 2, g.height / 2 + 10 * s);
+      ctx.textAlign   = "left";
     }
 
     ctx.restore();
+  }
+
+  /**
+   * Helper: fill a rectangle with rounded corners (without Path2D for compat).
+   */
+  _roundRect(ctx, x, y, w, h, r) {
+    if (w <= 0) return;
+    r = Math.min(r, h / 2, w / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+    ctx.fill();
+  }
 }
 
-function initGame() {
-    // Reset game state
-    bullets = [];
-    enemies = [];
-    enemyBullets = [];
-    walls = [];
-    powerups = [];
-    particles = [];
-    kills = 0;
-    waveCount = 1;
-    gameTime = 0;
-    cameraShake = 0;
-    
-    // Reset player
-    player.x = canvas.width / 2;
-    player.y = canvas.height / 2;
-    player.health = player.maxHealth;
-    player.alive = true;
-    isPaused = false;
-    
-    // Reset player stats
-    playerStats.level = 1;
-    playerStats.xp = 0;
-    playerStats.xpToNextLevel = 100;
-    playerStats.upgrades = {
-        speed: 0,
-        health: 0,
-        damage: 0,
-        fireRate: 0,
-        bulletSpeed: 0,
-        critChance: 0,
-        lifesteal: 0
-    };
-    
-    // Reset powerups
-    for (const type in activePowerups) {
-        activePowerups[type].active = false;
-    }
-    
-    // Spawn initial enemies (2 for wave 1)
-    for (let i = 0; i < 2; i++) {
-        spawnEnemy();
-    }
-    spawnWalls();
-    
-    // Mobile controls
-    isMobile = /Mobi|Android/i.test(navigator.userAgent);
-    mobileControls.style.display = isMobile ? 'flex' : 'none';
-    
-    // UI elements
-    restartBtn.style.display = 'none';
-    levelUpScreen.style.display = 'none';
-    canvas.focus();
-    
-    // Force a redraw
-    if (!player.alive) return;
-    update();
-    draw();
-}
 
-// Game loop function
-function gameLoop() {
-    if (!isPaused) {
-        update();
-    }
-    draw();
-    
-    // Add this check to prevent stuck state
-    if (levelUpScreen.style.display === 'block') {
-        isPaused = true;
-    }
-    
-    requestAnimationFrame(gameLoop);
-}
+// =============================================================================
+// SECTION 9 — GAME (Core Engine)
+// Owns the game loop, entity lists, pools, camera shake, and wave logic.
+// All other classes receive a reference to Game and call back into it.
+// =============================================================================
+class Game {
+  constructor() {
+    // ── Canvas & context ───────────────────────────────────────────────────
+    this.canvas = document.getElementById("gameCanvas");
+    this.ctx    = this.canvas.getContext("2d");
 
-// Initialize the game
-function initialize() {
-    // Load nickname if exists
-    const savedName = localStorage.getItem('playerNickname');
-    if (savedName) {
-        nicknameInput.value = savedName;
+    // ── Subsystems ─────────────────────────────────────────────────────────
+    this.input = new InputManager();
+    this.ui    = new UIManager(this);
+
+    // ── Object Pools (pre-warmed at construction) ──────────────────────────
+    this.bulletPool   = new ObjectPool(Bullet,   CONFIG.POOL_BULLETS);
+    this.particlePool = new ObjectPool(Particle, CONFIG.POOL_PARTICLES);
+
+    // ── Camera shake state ─────────────────────────────────────────────────
+    // Magnitude is reduced each frame via exponential decay + sine smoothing
+    this.cameraShake    = 0;
+    this._shakeTime     = 0;  // accumulated time used for sine oscillation
+
+    // ── Initialise canvas size ─────────────────────────────────────────────
+    this._resize();
+    window.addEventListener("resize", () => this._resize());
+
+    // Bind the loop so `this` is correct inside rAF callbacks
+    this._loop = this._loop.bind(this);
+  }
+
+  // ── Canvas resize ──────────────────────────────────────────────────────────
+
+  _resize() {
+    this.width  = this.canvas.width  = window.innerWidth;
+    this.height = this.canvas.height = window.innerHeight;
+
+    // uiScale keeps HUD proportional: 1.0 at 800×600, scales with resolution
+    this.uiScale = Utils.clamp(
+      Math.min(this.width / 800, this.height / 600),
+      0.7, 2.0
+    );
+    document.documentElement.style.setProperty("--ui-scale", this.uiScale);
+  }
+
+  // ── Start / restart ────────────────────────────────────────────────────────
+
+  /** Initialise (or reinitialise) all game state and kick off the loop. */
+  start() {
+    // Entity lists
+    this.player    = new Player(this);
+    this.enemies   = [];
+    this.bullets   = [];
+    this.particles = [];
+    this.walls     = [];
+    this.powerups  = [];
+
+    // Game counters
+    this.wave      = 1;
+    this.kills     = 0;
+    this.gameTime  = 0;
+    this.isPaused  = false;
+    this.lastTime  = performance.now();
+
+    // Camera
+    this.cameraShake = 0;
+    this._shakeTime  = 0;
+
+    // Spawn the first wave environment
+    this._spawnWalls();
+    for (let i = 0; i < 2; i++) this._spawnEnemy();
+
+    requestAnimationFrame(this._loop);
+  }
+
+  // ── Game Loop ──────────────────────────────────────────────────────────────
+
+  /**
+   * Core rAF callback.
+   * Computes dt, caps it to prevent physics tunnelling on tab-return,
+   * runs update and draw, then schedules the next frame.
+   *
+   * @param {DOMHighResTimeStamp} now — provided by the browser
+   */
+  _loop(now) {
+    // Delta time in seconds
+    let dt = (now - this.lastTime) / 1000;
+    // Cap at 100 ms (10 fps minimum equivalent) to prevent huge physics steps
+    // when the tab is hidden or the frame takes too long
+    if (dt > 0.1) dt = 0.1;
+    this.lastTime = now;
+
+    if (!this.isPaused && this.player.alive) {
+      this._update(dt);
     }
-    leaderboard.display();
-    
-    // Get reference to the start screen element
-    const startScreen = document.getElementById('startScreen');
-    
-    // Set up start button handler
-    startBtn.addEventListener('click', () => {
-        const nickname = nicknameInput.value.trim() || 'Player';
-        localStorage.setItem('playerNickname', nickname);
-        
-        // Hide the start screen
-        startScreen.style.display = 'none';
-        
-        // Focus the canvas for keyboard input
-        canvas.focus();
-        
-        initGame();
-        gameLoop();
+
+    this._draw();
+
+    // Keep looping while the player is alive OR particles are still visible
+    if (this.player.alive || this.particles.length > 0) {
+      requestAnimationFrame(this._loop);
+    }
+  }
+
+  // ── Update ─────────────────────────────────────────────────────────────────
+
+  _update(dt) {
+    this.gameTime += dt;
+
+    // ESC toggles pause
+    if (this.input.keys["escape"]) {
+      this.input.keys["escape"] = false;
+      this.isPaused = !this.isPaused;
+    }
+
+    // ── Player ──────────────────────────────────────────────────────────────
+    this.player.update(dt, this.input);
+
+    // ── Enemies ─────────────────────────────────────────────────────────────
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const e = this.enemies[i];
+      e.update(dt, this.player);
+      // hp check here catches exploder suicide (hp zeroed inside update)
+      if (e.hp <= 0) {
+        this._handleEnemyDeath(e, i);
+      }
+    }
+
+    // ── Bullets ─────────────────────────────────────────────────────────────
+    for (let i = this.bullets.length - 1; i >= 0; i--) {
+      const b = this.bullets[i];
+      b.update(dt);
+
+      let hit = false;
+
+      // ── Wall hit ──────────────────────────────────────────────────────────
+      const wall = this.checkWallCollision(b.x, b.y, b.size);
+      if (wall) {
+        wall.hp -= b.damage;
+        if (wall.hp <= 0) {
+          const wi = this.walls.indexOf(wall);
+          if (wi !== -1) Utils.removeFast(this.walls, wi);
+        }
+        this.spawnParticles(b.x, b.y, b.color, 5);
+        hit = true;
+      }
+
+      // ── Entity hit ────────────────────────────────────────────────────────
+      if (!hit) {
+        if (b.isEnemy) {
+          // Enemy bullet → test against player
+          const dSq = Utils.distSq(b.x, b.y, this.player.x, this.player.y);
+          if (dSq < (b.size + this.player.size) ** 2) {
+            if (this.player.buffs.shield <= 0) {
+              this.player.health -= b.damage;
+              this.cameraShake = Math.max(this.cameraShake, 5);
+            }
+            hit = true;
+            if (this.player.health <= 0) {
+              this.player.alive = false;
+              this.ui.showGameOver();
+            }
+          }
+        } else {
+          // Player bullet → test against each enemy
+          for (let j = this.enemies.length - 1; j >= 0; j--) {
+            const e   = this.enemies[j];
+            const dSq = Utils.distSq(b.x, b.y, e.x, e.y);
+
+            if (dSq < (b.size + e.size) ** 2) {
+              e.hp  -= b.damage;
+              hit    = true;
+
+              // Lifesteal: restore a % of damage dealt as HP
+              if (this.player.lifesteal > 0) {
+                this.player.health = Math.min(
+                  this.player.maxHealth,
+                  this.player.health + b.damage * this.player.lifesteal
+                );
+              }
+              if (e.hp <= 0) this._handleEnemyDeath(e, j);
+              break; // Each bullet hits only one enemy
+            }
+          }
+        }
+      }
+
+      // ── Out-of-bounds check ───────────────────────────────────────────────
+      if (!hit && (b.x < -80 || b.x > this.width + 80 || b.y < -80 || b.y > this.height + 80)) {
+        hit = true;
+      }
+
+      // ── Recycle bullet ────────────────────────────────────────────────────
+      if (hit) {
+        this.bulletPool.release(b);
+        Utils.removeFast(this.bullets, i);
+      }
+    }
+
+    // ── Powerups ────────────────────────────────────────────────────────────
+    for (let i = this.powerups.length - 1; i >= 0; i--) {
+      const pu = this.powerups[i];
+      if (Utils.distSq(this.player.x, this.player.y, pu.x, pu.y) < (this.player.size + pu.size) ** 2) {
+        this._applyPowerup(pu.type);
+        this.spawnParticles(pu.x, pu.y, pu.color, 20);
+        Utils.removeFast(this.powerups, i);
+      }
+    }
+
+    // ── Particles ───────────────────────────────────────────────────────────
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.update(dt);
+      if (p.life <= 0) {
+        this.particlePool.release(p);
+        Utils.removeFast(this.particles, i);
+      }
+    }
+
+    // ── Wave progression ─────────────────────────────────────────────────────
+    if (this.enemies.length === 0 && this.kills >= this.wave) {
+      this.kills = 0;
+      this.wave++;
+      this.cameraShake = Math.max(this.cameraShake, CONFIG.SHAKE_MAX);
+
+      const toSpawn = Math.min(30, 2 + this.wave);
+      for (let k = 0; k < toSpawn; k++) this._spawnEnemy();
+      // Refresh the arena layout every 3 waves
+      if (this.wave % 3 === 0) this._spawnWalls();
+    }
+
+    // ── Camera shake decay ───────────────────────────────────────────────────
+    // Exponential decay driven by SHAKE_DECAY: shake *= e^(-k*dt)
+    if (this.cameraShake > 0) {
+      this._shakeTime += dt;
+      this.cameraShake *= Math.exp(-CONFIG.SHAKE_DECAY * dt);
+      if (this.cameraShake < 0.05) {
+        this.cameraShake = 0;
+        this._shakeTime  = 0;
+      }
+    }
+  }
+
+  // ── Draw ───────────────────────────────────────────────────────────────────
+
+  _draw() {
+    const ctx = this.ctx;
+
+    // Clear with a slight trail effect — fully opaque fill ensures clean frame
+    ctx.fillStyle = "#050810";
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    ctx.save();
+
+    // ── Sine-wave camera shake ────────────────────────────────────────────
+    // Oscillates along a sine curve at SHAKE_FREQ Hz for smooth displacement
+    // instead of random jitter, which feels disorienting.
+    if (this.cameraShake > 0.05) {
+      const ox = Math.sin(this._shakeTime * CONFIG.SHAKE_FREQ * Math.PI * 2)        * this.cameraShake;
+      const oy = Math.sin(this._shakeTime * CONFIG.SHAKE_FREQ * Math.PI * 2 + 1.5)  * this.cameraShake;
+      ctx.translate(ox, oy);
+    }
+
+    // ── Walls ─────────────────────────────────────────────────────────────
+    this.walls.forEach(w => {
+      // Base fill
+      ctx.fillStyle = CONFIG.WALL_COLOR;
+      ctx.shadowBlur  = 6;
+      ctx.shadowColor = "rgba(0,229,255,0.2)";
+      ctx.fillRect(w.x, w.y, w.w, w.h);
+      ctx.shadowBlur  = 0;
+
+      // Health bar on top of wall
+      const hpR = Utils.clamp(w.hp / w.maxHp, 0, 1);
+      ctx.fillStyle = CONFIG.WALL_HP_COLOR;
+      ctx.fillRect(w.x, w.y - 9, w.w, 4);
+      ctx.fillStyle = CONFIG.WALL_HP_GOOD_COLOR;
+      ctx.fillRect(w.x, w.y - 9, w.w * hpR, 4);
     });
-    
-    // Set up restart button handler
-    restartBtn.addEventListener('click', () => {
-        initGame();
-        // Show the start screen again when restarting
-        startScreen.style.display = 'block';
+
+    // ── Powerups (pulsing glow) ───────────────────────────────────────────
+    this.powerups.forEach(pu => {
+      const pulse = Math.sin(this.gameTime * 5) * 2;
+      ctx.save();
+      ctx.shadowBlur  = 18;
+      ctx.shadowColor = pu.color;
+      ctx.fillStyle   = pu.color;
+      ctx.beginPath();
+      ctx.arc(pu.x, pu.y, pu.size + pulse, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     });
-    
-    // Handle window resize
-    window.addEventListener('resize', () => {
-        resizeCanvas();
-        // Force a redraw
-        draw();
-    });
-    
-    // Initial resize
-    resizeCanvas();
+
+    // ── Particles (behind everything else) ───────────────────────────────
+    this.particles.forEach(p => p.draw(ctx));
+
+    // ── Bullets ──────────────────────────────────────────────────────────
+    this.bullets.forEach(b => b.draw(ctx));
+
+    // ── Enemies ──────────────────────────────────────────────────────────
+    this.enemies.forEach(e => e.draw(ctx));
+
+    // ── Player ───────────────────────────────────────────────────────────
+    this.player.draw(ctx, this.input);
+
+    ctx.restore(); // pop camera shake transform
+
+    // ── HUD (drawn outside the shake transform — HUD never shakes) ───────
+    this.ui.drawHUD(ctx);
+  }
+
+  // ── Spawning helpers ───────────────────────────────────────────────────────
+
+  /** Spawn a new enemy at a random edge of the arena. */
+  _spawnEnemy() {
+    const side = Math.floor(Math.random() * 4);
+    const ex   = side === 0 ? 0
+               : side === 1 ? this.width
+               : Math.random() * this.width;
+    const ey   = side === 2 ? 0
+               : side === 3 ? this.height
+               : Math.random() * this.height;
+
+    // waveFactor drives hp/damage scaling; capped with log to avoid runaway
+    const waveFactor = Math.max(1, Math.log(this.wave + 1)) * CONFIG.WAVE_MULTIPLIER;
+
+    const r    = Math.random();
+    const type = r < 0.15 ? "tank"
+               : r < 0.30 ? "fast"
+               : r < 0.45 ? "spread"
+               : r < 0.60 ? "exploder"
+               : "normal";
+
+    this.enemies.push(new Enemy(this, ex, ey, type, waveFactor));
+  }
+
+  /** Scatter destructible cover walls across the arena. */
+  _spawnWalls() {
+    this.walls = [];
+    const count = Math.floor(Math.random() * 6) + 5;
+    for (let i = 0; i < count; i++) {
+      const w = 100 + Math.random() * 110;
+      const h = 18  + Math.random() * 28;
+      const maxHp = 10;
+      this.walls.push({
+        x: Math.random() * (this.width  - w - 40) + 20,
+        y: Math.random() * (this.height - h - 40) + 20,
+        w,
+        h,
+        hp: Math.floor(Math.random() * 5) + 3,
+        maxHp,
+      });
+    }
+  }
+
+  /**
+   * Emit a burst of particles at a world position.
+   * @param {number} x, y   — emission point
+   * @param {string} color  — particle colour
+   * @param {number} count  — how many to emit
+   */
+  spawnParticles(x, y, color, count = 20) {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = Math.random() * 3.5 + 0.8;
+      const p     = this.particlePool.get();
+      p.init(
+        x, y,
+        Math.cos(angle) * speed,
+        Math.sin(angle) * speed,
+        color,
+        Math.random() * 4 + 1.5,    // size
+        Math.random() * 0.5 + 0.4   // lifetime
+      );
+      this.particles.push(p);
+    }
+  }
+
+  /**
+   * Return the first wall that overlaps the given circle, or null.
+   * Used by Player, Enemy, and bullet update for obstruction checks.
+   *
+   * @param {number} x, y  — circle centre
+   * @param {number} size  — circle radius
+   * @returns {Object|null}
+   */
+  checkWallCollision(x, y, size) {
+    for (const w of this.walls) {
+      if (Utils.circleRect(x, y, size, w.x, w.y, w.w, w.h)) return w;
+    }
+    return null;
+  }
+
+  // ── Enemy death / powerup logic ────────────────────────────────────────────
+
+  /**
+   * Award XP, maybe drop a powerup, spawn death particles, and remove the
+   * enemy from the active list.
+   *
+   * @param {Enemy}  enemy
+   * @param {number} index — index in this.enemies
+   */
+  _handleEnemyDeath(enemy, index) {
+    // 20 % chance to drop a powerup
+    if (Math.random() < 0.2) {
+      const types = CONFIG.POWERUP_TYPES;
+      const type  = types[Math.floor(Math.random() * types.length)];
+      this.powerups.push({
+        x:     enemy.x,
+        y:     enemy.y,
+        type,
+        size:  12 * this.uiScale,
+        color: CONFIG.POWERUP_COLORS[type],
+      });
+    }
+
+    this.kills++;
+    this.player.addXP(10 + Math.floor(Math.log2(this.wave + 1)) * 2);
+    this.spawnParticles(enemy.x, enemy.y, enemy.color, 22);
+    Utils.removeFast(this.enemies, index);
+  }
+
+  /**
+   * Apply the effect of a collected powerup to the player.
+   * @param {string} type — one of CONFIG.POWERUP_TYPES
+   */
+  _applyPowerup(type) {
+    switch (type) {
+      case "health":
+        this.player.health = Math.min(this.player.maxHealth, this.player.health + 35);
+        break;
+      case "xp":
+        this.player.addXP(30);
+        break;
+      case "shield":
+        this.player.buffs.shield     = 10;
+        break;
+      case "triple_shot":
+        this.player.buffs.tripleShot = 8;
+        break;
+      case "speed_boost":
+        this.player.buffs.speedBoost = 7;
+        break;
+      case "rage":
+        this.player.buffs.rage       = 5;
+        break;
+      default:
+        console.warn(`Unknown powerup type: ${type}`);
+    }
+  }
 }
 
-// Start everything when the DOM is loaded
-document.addEventListener('DOMContentLoaded', initialize);
+
+// =============================================================================
+// SECTION 10 — BOOTSTRAP
+// =============================================================================
+window.addEventListener("load", () => {
+  const game = new Game();
+
+  // Expose to browser console for debugging (e.g., window.kGame.wave)
+  // Safe to remove in production.
+  window.kGame = game;
+});
