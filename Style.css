@@ -498,11 +498,16 @@ button:active {
    11. MOBILE CONTROLS
    ───────────────────────────────────────────────────────────── */
 .mobile-ui {
-  display: none;                /* Hidden by default; toggled by UIManager */
+  display: none;                /* Hidden by default; shown by media query or JS class */
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 50;
+}
+
+/* JS can force-show mobile controls (e.g. touch laptop at full width) */
+.mobile-ui--active {
+  display: block !important;
 }
 
 /* Joystick base */
@@ -567,6 +572,34 @@ button:active {
 .btn--shoot:active {
   background: var(--col-accent);
   box-shadow: var(--glow-accent), 0 0 32px rgba(255, 45, 85, 0.7);
+}
+
+/* Pause button (top-right on mobile) */
+.btn--pause {
+  position: absolute;
+  top: calc(20px * var(--ui-scale));
+  right: calc(20px * var(--ui-scale));
+  width: calc(52px * var(--ui-scale));
+  height: calc(52px * var(--ui-scale));
+  border-radius: 50%;
+  background: rgba(0, 229, 255, 0.08);
+  border: 2px solid rgba(0, 229, 255, 0.35);
+  color: var(--col-primary);
+  font-size: calc(1.3rem * var(--ui-scale));
+  pointer-events: auto;
+  backdrop-filter: blur(6px);
+  box-shadow: var(--glow-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background var(--dur-fast),
+    box-shadow var(--dur-fast);
+}
+
+.btn--pause:active {
+  background: rgba(0, 229, 255, 0.25);
+  box-shadow: var(--glow-primary), 0 0 32px rgba(0, 229, 255, 0.5);
 }
 
 
