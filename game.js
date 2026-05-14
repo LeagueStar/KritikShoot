@@ -655,8 +655,11 @@ class InputManager {
     this.joystickX      = 0;
     this.joystickY      = 0;
 
-    // Detect mobile once at init
-    this.isMobile = /Mobi|Android/i.test(navigator.userAgent);
+    // Detect touch capability (covers mobile, tablets, and touch laptops)
+    this.isMobile = /Mobi|Android/i.test(navigator.userAgent) || window.innerWidth <= 768;
+
+    // Set by pause button or ESC; consumed by Game._loop
+    this._pausePressed = false;
 
     this._bindListeners();
   }
@@ -721,6 +724,18 @@ class InputManager {
       e.preventDefault();
       this.isShooting = false;
     });
+
+    // ── Pause button (mobile) ───────────────────────────────────────────────
+    const pauseBtn = document.getElementById("pauseBtn");
+    if (pauseBtn) {
+      pauseBtn.addEventListener("touchstart", e => {
+        e.preventDefault();
+        this._pausePressed = true;
+      });
+      pauseBtn.addEventListener("click", () => {
+        this._pausePressed = true;
+      });
+    }
   }
 
   /**
@@ -777,8 +792,8 @@ class UIManager {
       localStorage.setItem("ks_nickname", name);
 
       this._el.startScreen.classList.add("hidden");
-      if (this.game.input.isMobile) {
-        this._el.mobileUI.style.display = "block";
+      if (this.game.input.isMobile || window.innerWidth <= 768) {
+        this._el.mobileUI.classList.add("mobile-ui--active");
       }
       this.game.start();
     });
@@ -957,10 +972,18 @@ class UIManager {
 
     // ── Pause indicator ────────────────────────────────────────────────────
     if (g.isPaused) {
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillRect(0, 0, g.width, g.height);
       ctx.font      = `900 ${Math.max(18, 28 * s)}px ${CONFIG.HUD_FONT}`;
-      ctx.fillStyle = "rgba(0,229,255,0.6)";
+      ctx.fillStyle = "rgba(0,229,255,0.9)";
+      ctx.shadowBlur  = 18;
+      ctx.shadowColor = "rgba(0,229,255,0.6)";
       ctx.textAlign = "center";
-      ctx.fillText("PAUSED", g.width / 2, m);
+      ctx.fillText("⏸ PAUSED", g.width / 2, g.height / 2 - 20 * s);
+      ctx.shadowBlur  = 0;
+      ctx.font      = `600 ${Math.max(13, 17 * s)}px ${CONFIG.HUD_FONT}`;
+      ctx.fillStyle = "rgba(232,240,254,0.6)";
+      ctx.fillText("ESC or ⏸ button to resume", g.width / 2, g.height / 2 + 16 * s);
       ctx.textAlign = "left";
     }
 
@@ -1058,6 +1081,9 @@ class Game {
 
   /** Initialise (or reinitialise) all game state and kick off the loop. */
   start() {
+    // Cancel any running loop before resetting state (prevents double-loop on restart)
+    this._running = false;
+
     // Entity lists
     this.player    = new Player(this);
     this.enemies   = [];
@@ -1081,6 +1107,7 @@ class Game {
     this._spawnWalls();
     for (let i = 0; i < 2; i++) this._spawnEnemy();
 
+    this._running = true;
     requestAnimationFrame(this._loop);
   }
 
@@ -1094,6 +1121,9 @@ class Game {
    * @param {DOMHighResTimeStamp} now — provided by the browser
    */
   _loop(now) {
+    // If start() was called again, this old loop instance should die
+    if (!this._running) return;
+
     // Delta time in seconds
     let dt = (now - this.lastTime) / 1000;
     // Cap at 100 ms (10 fps minimum equivalent) to prevent huge physics steps
@@ -1101,28 +1131,37 @@ class Game {
     if (dt > 0.1) dt = 0.1;
     this.lastTime = now;
 
+    // ESC / pause-btn toggle — must run even while paused so you can unpause
+    if (this.input.keys["escape"]) {
+      this.input.keys["escape"] = false;
+      if (this.player && this.player.alive) {
+        this.isPaused = !this.isPaused;
+        if (!this.isPaused) this.lastTime = performance.now();
+      }
+    }
+    if (this.input._pausePressed) {
+      this.input._pausePressed = false;
+      if (this.player && this.player.alive) {
+        this.isPaused = !this.isPaused;
+        if (!this.isPaused) this.lastTime = performance.now();
+      }
+    }
+
     if (!this.isPaused && this.player.alive) {
       this._update(dt);
     }
 
     this._draw();
 
-    // Keep looping while the player is alive OR particles are still visible
-    if (this.player.alive || this.particles.length > 0) {
-      requestAnimationFrame(this._loop);
-    }
+    // Always keep looping — after death the game-over overlay stays rendered
+    // and the restart button remains interactive until the player restarts.
+    requestAnimationFrame(this._loop);
   }
 
   // ── Update ─────────────────────────────────────────────────────────────────
 
   _update(dt) {
     this.gameTime += dt;
-
-    // ESC toggles pause
-    if (this.input.keys["escape"]) {
-      this.input.keys["escape"] = false;
-      this.isPaused = !this.isPaused;
-    }
 
     // ── Player ──────────────────────────────────────────────────────────────
     this.player.update(dt, this.input);
