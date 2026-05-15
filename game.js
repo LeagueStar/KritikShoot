@@ -383,9 +383,17 @@ class Player {
     this._lastShot = this.game.gameTime;
 
     // Mobile: auto-aim at closest enemy; desktop: aim at mouse cursor
-    const angle = input.isMobile && this.game.enemies.length > 0
-      ? Math.atan2(this.game.enemies[0].y - this.y, this.game.enemies[0].x - this.x)
-      : Math.atan2(input.mouseY - this.y, input.mouseX - this.x);
+    let angle;
+    if (input.isMobile && this.game.enemies.length > 0) {
+      let nearestDSq = Infinity, nearest = this.game.enemies[0];
+      for (const e of this.game.enemies) {
+        const dSq = Utils.distSq(this.x, this.y, e.x, e.y);
+        if (dSq < nearestDSq) { nearestDSq = dSq; nearest = e; }
+      }
+      angle = Math.atan2(nearest.y - this.y, nearest.x - this.x);
+    } else {
+      angle = Math.atan2(input.mouseY - this.y, input.mouseX - this.x);
+    }
 
     // Triple-shot buff adds two spread shots
     const angles = (this.buffs.tripleShot > 0)
@@ -435,9 +443,17 @@ class Player {
   draw(ctx, input) {
     if (!this.alive) return;
 
-    const angle = input.isMobile && this.game.enemies.length > 0
-      ? Math.atan2(this.game.enemies[0].y - this.y, this.game.enemies[0].x - this.x)
-      : Math.atan2(input.mouseY - this.y, input.mouseX - this.x);
+    let angle;
+    if (input.isMobile && this.game.enemies.length > 0) {
+      let nearestDSq = Infinity, nearest = this.game.enemies[0];
+      for (const e of this.game.enemies) {
+        const dSq = Utils.distSq(this.x, this.y, e.x, e.y);
+        if (dSq < nearestDSq) { nearestDSq = dSq; nearest = e; }
+      }
+      angle = Math.atan2(nearest.y - this.y, nearest.x - this.x);
+    } else {
+      angle = Math.atan2(input.mouseY - this.y, input.mouseX - this.x);
+    }
 
     ctx.save();
     ctx.translate(this.x, this.y);
@@ -576,11 +592,19 @@ class Enemy {
 
         const blastRadSq = (105 * this.game.uiScale) ** 2;
         const dSq        = Utils.distSq(this.x, this.y, player.x, player.y);
-        if (dSq < blastRadSq) {
+        if (dSq < blastRadSq && player.alive) {
           // Damage falls off linearly with distance
           const falloff = 1 - (Math.sqrt(dSq) / Math.sqrt(blastRadSq));
           player.health -= this.damage * 2 * falloff;
           this.game.cameraShake = Math.max(this.game.cameraShake, CONFIG.SHAKE_MAX * 1.5);
+          if (player.health <= 0) {
+            player.alive  = false;
+            player.health = 0;
+            if (!this.game._gameOverFired) {
+              this.game._gameOverFired = true;
+              this.game.ui.showGameOver();
+            }
+          }
         }
         return;
       }
@@ -801,6 +825,10 @@ class UIManager {
     // ── Restart button ───────────────────────────────────────────────────────
     document.getElementById("restartBtn").addEventListener("click", () => {
       this._el.restartBtn.classList.add("hidden");
+      // Re-show mobile controls if needed (they may have been hidden by page flow)
+      if (this.game.input.isMobile || window.innerWidth <= 768) {
+        this._el.mobileUI.classList.add("mobile-ui--active");
+      }
       this.game.start();
     });
 
@@ -1059,8 +1087,8 @@ class Game {
     this._resize();
     window.addEventListener("resize", () => this._resize());
 
-    // Bind the loop so `this` is correct inside rAF callbacks
-    this._loop = this._loop.bind(this);
+    // Generation counter — incremented on every start() to kill stale rAF loops
+    this._gen = 0;
   }
 
   // ── Canvas resize ──────────────────────────────────────────────────────────
@@ -1081,8 +1109,10 @@ class Game {
 
   /** Initialise (or reinitialise) all game state and kick off the loop. */
   start() {
-    // Cancel any running loop before resetting state (prevents double-loop on restart)
-    this._running = false;
+    // Increment generation: any in-flight rAF callback from the old run will
+    // see a stale generation and immediately return without scheduling again.
+    this._gen = (this._gen || 0) + 1;
+    const myGen = this._gen;
 
     // Entity lists
     this.player    = new Player(this);
@@ -1091,6 +1121,9 @@ class Game {
     this.particles = [];
     this.walls     = [];
     this.powerups  = [];
+
+    // Flags
+    this._gameOverFired = false;  // ensures showGameOver() is called exactly once
 
     // Game counters
     this.wave      = 1;
@@ -1107,8 +1140,7 @@ class Game {
     this._spawnWalls();
     for (let i = 0; i < 2; i++) this._spawnEnemy();
 
-    this._running = true;
-    requestAnimationFrame(this._loop);
+    requestAnimationFrame(ts => this._loop(ts, myGen));
   }
 
   // ── Game Loop ──────────────────────────────────────────────────────────────
@@ -1120,9 +1152,9 @@ class Game {
    *
    * @param {DOMHighResTimeStamp} now — provided by the browser
    */
-  _loop(now) {
-    // If start() was called again, this old loop instance should die
-    if (!this._running) return;
+  _loop(now, gen) {
+    // Stale generation = a restart happened; silently drop this callback
+    if (gen !== this._gen) return;
 
     // Delta time in seconds
     let dt = (now - this.lastTime) / 1000;
@@ -1155,7 +1187,7 @@ class Game {
 
     // Always keep looping — after death the game-over overlay stays rendered
     // and the restart button remains interactive until the player restarts.
-    requestAnimationFrame(this._loop);
+    requestAnimationFrame(ts => this._loop(ts, gen));
   }
 
   // ── Update ─────────────────────────────────────────────────────────────────
@@ -1198,17 +1230,24 @@ class Game {
       // ── Entity hit ────────────────────────────────────────────────────────
       if (!hit) {
         if (b.isEnemy) {
-          // Enemy bullet → test against player
-          const dSq = Utils.distSq(b.x, b.y, this.player.x, this.player.y);
-          if (dSq < (b.size + this.player.size) ** 2) {
-            if (this.player.buffs.shield <= 0) {
-              this.player.health -= b.damage;
-              this.cameraShake = Math.max(this.cameraShake, 5);
-            }
-            hit = true;
-            if (this.player.health <= 0) {
-              this.player.alive = false;
-              this.ui.showGameOver();
+          // Enemy bullet → test against player (skip if already dead)
+          if (!this.player.alive) { hit = true; }
+          else {
+            const dSq = Utils.distSq(b.x, b.y, this.player.x, this.player.y);
+            if (dSq < (b.size + this.player.size) ** 2) {
+              if (this.player.buffs.shield <= 0) {
+                this.player.health -= b.damage;
+                this.cameraShake = Math.max(this.cameraShake, 5);
+              }
+              hit = true;
+              if (this.player.health <= 0 && this.player.alive) {
+                this.player.alive  = false;
+                this.player.health = 0;
+                if (!this._gameOverFired) {
+                  this._gameOverFired = true;
+                  this.ui.showGameOver();
+                }
+              }
             }
           }
         } else {
