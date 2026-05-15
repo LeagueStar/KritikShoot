@@ -1,57 +1,199 @@
 <div align="center">
 
-# ░▒▓█ ＫＲＩＴＩＫＳＨＯＯＴ █▓▒░
+# 🎯 KritikShoot
+**A sleek, high-performance shooting mechanics and gameplay framework.**
 
-**A Zero-Dependency, Frame-Perfect HTML5 Survival Shooter**
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![Stars](https://img.shields.io/github/stars/LeagueStar/KritikShoot?style=for-the-badge&color=yellow)](https://github.com/LeagueStar/KritikShoot/stargazers)
+[![Issues](https://img.shields.io/github/issues/LeagueStar/KritikShoot?style=for-the-badge&color=red)](https://github.com/LeagueStar/KritikShoot/issues)
+[![Contributions Welcome](https://img.shields.io/badge/Contributions-Welcome-brightgreen.svg?style=for-the-badge)](#-contributing)
 
-[![Engine](https://img.shields.io/badge/Engine-Vanilla_JS-050810?style=for-the-badge&logo=javascript&logoColor=00e5ff)](#)
-[![UI](https://img.shields.io/badge/UI-Glassmorphism-050810?style=for-the-badge&logo=css3&logoColor=00e5ff)](#)
-[![Status](https://img.shields.io/badge/Status-Deployed-050810?style=for-the-badge&logo=html5&logoColor=2ecc71)](#)
+> *KritikShoot provides the core systems needed to handle weapon behavior, projectile physics, and hit registration with maximum precision.*
 
-> *No frameworks. No bloat. Pure, unadulterated performance.*
+<br />
+
+<img src="https://via.placeholder.com/800x400/1a1a1a/ffffff?text=Add+Gameplay+GIF/Screenshot+Here" alt="KritikShoot Preview" width="100%" style="border-radius: 8px;" />
+
+<br />
 
 </div>
 
-<br>
+---
 
-## ▰▰▰ ENGINE ARCHITECTURE ▰▰▰
+## 📖 Table of Contents
+- [✨ Features](#-features)
+- [🚀 Getting Started](#-getting-started)
+- [🕹️ Usage & Configuration](#-usage--configuration)
+- [🗺️ Roadmap](#-roadmap)
+- [🤝 Contributing](#-contributing)
+- [📄 License](#-license)
 
-This project is more than a game; it is a custom-built, lightweight rendering engine engineered for absolute performance across desktop and mobile.
+---
 
-* **Zero GC Stutter:** Implements strict Object Pooling for all bullets (300 pool) and particles (500 pool), pre-allocating memory to ensure flawless performance during heavy waves without Garbage Collection pauses.
-* **O(1) Memory Management:** Utilizes fast array removal techniques, bypassing expensive `Array.splice` operations for entity tracking.
-* **Optimized Physics:** Hot-loop collision detection relies entirely on `distanceSq` calculations, completely avoiding CPU-heavy `Math.sqrt()` calls.
-* **Frame-Rate Agnostic:** Driven by a robust `requestAnimationFrame` loop utilizing Delta-Time (`dt`), ensuring game speed is perfectly consistent regardless of monitor refresh rate.
+## ✨ Features
 
-<br>
+We built **KritikShoot** with modularity and performance in mind. 
 
-## ▰▰▰ VISUAL DESIGN SYSTEM ▰▰▰
+| Feature | Description |
+| :--- | :--- |
+| **🔫 Advanced Ballistics** | Realistic bullet drop, travel time, and material penetration logic. |
+| **🌀 Dynamic Recoil** | Fully customizable procedural recoil patterns and camera recovery. |
+| **🎒 Modular Loadouts** | Easily swap weapon components, attachments, and ammunition types. |
+| **⚡ Hit Registration** | Highly optimized prediction with accurate server-side validation. |
+| **💥 Reactive VFX/SFX** | Dynamic impact effects mapped perfectly to surface materials. |
 
-The aesthetic is driven by a strict Neon-Noir and Cyberpunk design language.
+---
 
-* **Glassmorphism UI:** Panels feature backdrop-blur, saturation boosts, and subtle gradient shines to simulate refractive glass.
-* **Cinematic Camera:** Screen shake relies on sine-wave oscillation and exponential decay, providing smooth, heavy impacts rather than chaotic random displacement.
-* **Dynamic Resolution:** The HUD utilizes a custom `--ui-scale` CSS variable injected dynamically to ensure perfect proportions across all devices.
-* **Layered Rendering:** Employs `ctx.shadowBlur` extensively for glowing entities, paired with custom HTML canvas composite rendering.
+## 🚀 Getting Started
 
-<br>
+Follow these steps to get a local copy up and running.
 
-## ▰▰▰ GAMEPLAY MECHANICS ▰▰▰
+### Prerequisites
 
-* **RPG Progression:** Earn XP to access a dynamic upgrade tree (Speed, Health, Damage, Fire Rate, Bullet Speed, Crit Chance, Lifesteal).
-* **Dynamic Scaling:** Encounter 5 unique enemy archetypes (Normal, Tank, Fast, Spread, Exploder) whose health and damage scale via a logarithmic wave factor.
-* **Universal Input:** Seamlessly handles desktop (WASD + Mouse) and mobile platforms via a custom-built multi-touch virtual joystick.
-* **Persistent Glory:** Integrated LocalStorage leaderboards track the top 10 runs, sorted by wave reached and completion time.
+Ensure you have the following installed on your local machine:
+* Git
+* [Your Engine/Language, e.g., Unity 2022.3+ / Python 3.10+ / Node.js]
 
-<br>
+### Installation
 
-## ▰▰▰ DEPLOYMENT PROTOCOL ▰▰▰
+1. **Clone the repository**
+   ```bash
+   git clone [https://github.com/LeagueStar/KritikShoot.git](https://github.com/LeagueStar/KritikShoot.git)
+2. **Navigate to the directory**
+   ```bash
+   cd KritikShoot
+3. **Install dependencies / Setup Project**
+   ```bash
+   # Add your specific setup command here
+   npm install # or
+   make setup
 
-Because KritikShoot is 100% vanilla, initialization is instant. No package managers required.
+<div align="center">
 
-```bash
-# 1. Clone the repository
-git clone [https://github.com/LeagueStar/KritikShoot.git](https://github.com/LeagueStar/KritikShoot.git)
+# 🎯 KritikShoot
+**A sleek, high-performance shooting mechanics and gameplay framework.**
 
-# 2. Access the directory
-cd KritikShoot
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![Stars](https://img.shields.io/github/stars/LeagueStar/KritikShoot?style=for-the-badge&color=yellow)](https://github.com/LeagueStar/KritikShoot/stargazers)
+[![Issues](https://img.shields.io/github/issues/LeagueStar/KritikShoot?style=for-the-badge&color=red)](https://github.com/LeagueStar/KritikShoot/issues)
+[![Contributions Welcome](https://img.shields.io/badge/Contributions-Welcome-brightgreen.svg?style=for-the-badge)](#-contributing)
+
+> *KritikShoot provides the core systems needed to handle weapon behavior, projectile physics, and hit registration with maximum precision.*
+
+<br />
+
+<img src="https://via.placeholder.com/800x400/1a1a1a/ffffff?text=Add+Gameplay+GIF/Screenshot+Here" alt="KritikShoot Preview" width="100%" style="border-radius: 8px;" />
+
+<br />
+
+</div>
+
+---
+
+## 📖 Table of Contents
+- [✨ Features](#-features)
+- [🚀 Getting Started](#-getting-started)
+- [🕹️ Usage & Configuration](#-usage--configuration)
+- [🗺️ Roadmap](#-roadmap)
+- [🤝 Contributing](#-contributing)
+- [📄 License](#-license)
+
+---
+
+## ✨ Features
+
+We built **KritikShoot** with modularity and performance in mind. 
+
+| Feature | Description |
+| :--- | :--- |
+| **🔫 Advanced Ballistics** | Realistic bullet drop, travel time, and material penetration logic. |
+| **🌀 Dynamic Recoil** | Fully customizable procedural recoil patterns and camera recovery. |
+| **🎒 Modular Loadouts** | Easily swap weapon components, attachments, and ammunition types. |
+| **⚡ Hit Registration** | Highly optimized prediction with accurate server-side validation. |
+| **💥 Reactive VFX/SFX** | Dynamic impact effects mapped perfectly to surface materials. |
+
+---
+
+## 🚀 Getting Started
+
+Follow these steps to get a local copy up and running.
+
+### Prerequisites
+
+Ensure you have the following installed on your local machine:
+* Git
+* [Your Engine/Language, e.g., Unity 2022.3+ / Python 3.10+ / Node.js]
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone [https://github.com/LeagueStar/KritikShoot.git](https://github.com/LeagueStar/KritikShoot.git)
+   
+```
+
+2. **Navigate to the directory**
+   ```bash
+   cd KritikShoot
+   ```
+
+3. **Install dependencies / Setup Project**
+   ```bash
+   # Add your specific setup command here
+   npm install # or
+   make setup
+   
+```
+
+---
+
+## 🕹️ Usage & Configuration
+
+KritikShoot is designed to be plug-and-play. Initialize the core systems in your player controller:
+
+```javascript
+// Example: Basic Weapon Initialization
+const weapon = new KritikShoot.Weapon({
+    fireRate: 600,       // RPM
+    magSize: 30,         // Bullets per magazine
+    recoilType: 'procedural',
+    baseDamage: 25
+});
+
+// Fire weapon handler
+player.onInput('fire', () => {
+    weapon.fire();
+});
+```
+
+### Tweaking the Config
+
+Head over to the `config/` directory to fine-tune weapon behaviors. You can easily adjust parameters like `spread_min`, `spread_max`, and `damage_falloff` to perfectly match your game's feel.
+
+---
+
+## 🗺️ Roadmap
+
+- [x] Base shooting mechanics and raycasting
+- [x] Procedural recoil system
+- [ ] Projectile physics and gravity simulation
+- [ ] Multiplayer hit validation
+- [ ] AI target integration
+
+---
+
+## 🤝 Contributing
+
+Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are greatly appreciated.
+
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+---
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE` for more information.
