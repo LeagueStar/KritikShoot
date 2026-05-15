@@ -1,129 +1,276 @@
 <div align="center">
 
 # 🎯 KritikShoot
-**A sleek, high-performance shooting mechanics and gameplay framework.**
+### A modern, modular, and high-performance shooting framework.
+
+KritikShoot is a scalable gameplay framework focused on delivering responsive weapon mechanics, realistic shooting systems, and highly customizable combat behavior for modern games.
+
+<br/>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Stars](https://img.shields.io/github/stars/LeagueStar/KritikShoot?style=for-the-badge&color=yellow)](https://github.com/LeagueStar/KritikShoot/stargazers)
 [![Issues](https://img.shields.io/github/issues/LeagueStar/KritikShoot?style=for-the-badge&color=red)](https://github.com/LeagueStar/KritikShoot/issues)
 [![Contributions Welcome](https://img.shields.io/badge/Contributions-Welcome-brightgreen.svg?style=for-the-badge)](#-contributing)
 
-> *KritikShoot provides the core systems needed to handle weapon behavior, projectile physics, and hit registration with maximum precision.*
+<br/>
 
-<br />
+<img src="https://via.placeholder.com/1000x450/0d1117/ffffff?text=KritikShoot+Gameplay+Preview" alt="KritikShoot Preview" width="100%" />
 
-<img src="https://via.placeholder.com/800x400/1a1a1a/ffffff?text=Add+Gameplay+GIF/Screenshot+Here" alt="KritikShoot Preview" width="100%" style="border-radius: 8px;" />
+<br/>
 
-<br />
+> *Built for precision, performance, and scalability.*
 
 </div>
 
 ---
 
-## 📖 Table of Contents
+# 📚 Table of Contents
+
 - [✨ Features](#-features)
+- [⚙️ Architecture](#️-architecture)
 - [🚀 Getting Started](#-getting-started)
-- [🕹️ Usage & Configuration](#-usage--configuration)
-- [🗺️ Roadmap](#-roadmap)
+- [🕹️ Usage](#️-usage)
+- [🎛️ Configuration](#️-configuration)
+- [📁 Project Structure](#-project-structure)
+- [🗺️ Roadmap](#️-roadmap)
 - [🤝 Contributing](#-contributing)
 - [📄 License](#-license)
 
 ---
 
-## ✨ Features
+# ✨ Features
 
-We built **KritikShoot** with modularity and performance in mind. 
+KritikShoot is designed with modularity and performance in mind.
 
 | Feature | Description |
-| :--- | :--- |
-| **🔫 Advanced Ballistics** | Realistic bullet drop, travel time, and material penetration logic. |
-| **🌀 Dynamic Recoil** | Fully customizable procedural recoil patterns and camera recovery. |
-| **🎒 Modular Loadouts** | Easily swap weapon components, attachments, and ammunition types. |
-| **⚡ Hit Registration** | Highly optimized prediction with accurate server-side validation. |
-| **💥 Reactive VFX/SFX** | Dynamic impact effects mapped perfectly to surface materials. |
+|---|---|
+| 🔫 Advanced Weapon System | Flexible weapon framework with support for multiple firing modes. |
+| 🎯 Precision Hit Detection | Accurate raycast and projectile-based hit registration. |
+| 🌀 Dynamic Recoil Engine | Procedural recoil with configurable patterns and recovery. |
+| ⚡ Optimized Performance | Lightweight systems designed for fast-paced gameplay. |
+| 🎒 Modular Attachments | Easily extend weapons with scopes, suppressors, grips, and magazines. |
+| 💥 Reactive Effects | Surface-based impact VFX, tracers, and audio feedback. |
+| 🌍 Multiplayer Ready | Structured for server-side validation and networking support. |
+| 🧩 Plug-and-Play Design | Easy integration into existing game projects. |
 
 ---
 
-## 🚀 Getting Started
+# ⚙️ Architecture
 
-Follow these steps to get a local copy up and running.
+KritikShoot follows a modular gameplay pipeline:
 
-### Prerequisites
-
-Ensure you have the following installed on your local machine:
-* Git
-* [Your Engine/Language, e.g., Unity 2022.3+ / Python 3.10+ / Node.js]
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone [https://github.com/LeagueStar/KritikShoot.git](https://github.com/LeagueStar/KritikShoot.git)
-   
+```text
+Player Input
+     ↓
+Weapon Controller
+     ↓
+Fire Logic
+     ↓
+Ballistics / Raycasting
+     ↓
+Hit Detection
+     ↓
+Damage System
+     ↓
+Visual & Audio Effects
 ```
 
-2. **Navigate to the directory**
-   ```bash
-   cd KritikShoot
-   ```
+Each component is isolated for maintainability, scalability, and future expansion.
 
-3. **Install dependencies / Setup Project**
-   ```bash
-   # Add your specific setup command here
-   npm install # or
-   make setup
-   
+---
+
+# 🚀 Getting Started
+
+## Prerequisites
+
+Before installation, ensure you have:
+
+- Git
+- Your preferred engine/runtime installed
+  - Unity 2022.3+
+  - Unreal Engine 5+
+  - Node.js
+  - Custom engine support (depending on implementation)
+
+---
+
+## Installation
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/LeagueStar/KritikShoot.git
+```
+
+### 2. Navigate into the project directory
+
+```bash
+cd KritikShoot
+```
+
+### 3. Install dependencies
+
+```bash
+npm install
+```
+
+Or run your custom setup command:
+
+```bash
+make setup
 ```
 
 ---
 
-## 🕹️ Usage & Configuration
+# 🕹️ Usage
 
-KritikShoot is designed to be plug-and-play. Initialize the core systems in your player controller:
+## Basic Weapon Initialization
 
 ```javascript
-// Example: Basic Weapon Initialization
 const weapon = new KritikShoot.Weapon({
-    fireRate: 600,       // RPM
-    magSize: 30,         // Bullets per magazine
-    recoilType: 'procedural',
-    baseDamage: 25
+    name: "AR-01",
+    fireRate: 600,
+    magSize: 30,
+    baseDamage: 25,
+    recoilType: "procedural",
+    reloadTime: 2.1
 });
+```
 
-// Fire weapon handler
-player.onInput('fire', () => {
+---
+
+## Firing Logic
+
+```javascript
+player.onInput("fire", () => {
     weapon.fire();
 });
 ```
 
-### Tweaking the Config
+---
 
-Head over to the `config/` directory to fine-tune weapon behaviors. You can easily adjust parameters like `spread_min`, `spread_max`, and `damage_falloff` to perfectly match your game's feel.
+## Reload Logic
+
+```javascript
+player.onInput("reload", () => {
+    weapon.reload();
+});
+```
 
 ---
 
-## 🗺️ Roadmap
+# 🎛️ Configuration
 
-- [x] Base shooting mechanics and raycasting
+Gameplay behavior can be tuned through the `config/` directory.
+
+## Example Configuration
+
+```json
+{
+  "spread_min": 0.2,
+  "spread_max": 2.4,
+  "damage_falloff": 0.75,
+  "recoil_vertical": 1.8,
+  "recoil_horizontal": 0.7,
+  "bullet_velocity": 950
+}
+```
+
+---
+
+## Editable Parameters
+
+| Parameter | Purpose |
+|---|---|
+| `fireRate` | Weapon RPM |
+| `spread_min` | Minimum bullet spread |
+| `spread_max` | Maximum spread during sustained fire |
+| `damage_falloff` | Damage reduction over distance |
+| `bullet_velocity` | Projectile speed |
+| `reloadTime` | Reload duration |
+| `recoil_vertical` | Vertical recoil intensity |
+| `recoil_horizontal` | Horizontal recoil intensity |
+
+---
+
+# 📁 Project Structure
+
+```text
+KritikShoot/
+│
+├── config/              # Weapon and gameplay configs
+├── core/                # Core framework systems
+├── weapons/             # Weapon definitions
+├── projectiles/         # Projectile physics
+├── effects/             # Visual and audio effects
+├── multiplayer/         # Networking and validation
+├── utils/               # Utility helpers
+└── examples/            # Example implementations
+```
+
+---
+
+# 🗺️ Roadmap
+
+## Current Progress
+
+- [x] Base shooting mechanics
+- [x] Raycast hit detection
 - [x] Procedural recoil system
-- [ ] Projectile physics and gravity simulation
-- [ ] Multiplayer hit validation
-- [ ] AI target integration
+- [x] Weapon configuration framework
+- [ ] Projectile gravity simulation
+- [ ] Multiplayer synchronization
+- [ ] Server-authoritative hit validation
+- [ ] AI combat integration
+- [ ] Animation blending support
+- [ ] Advanced destruction system
 
 ---
 
-## 🤝 Contributing
+# 🤝 Contributing
 
-Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are greatly appreciated.
+Contributions are welcome and greatly appreciated.
 
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
+## How to Contribute
+
+1. Fork the repository
+
+2. Create your feature branch
+
+```bash
+git checkout -b feature/AmazingFeature
+```
+
+3. Commit your changes
+
+```bash
+git commit -m "Add AmazingFeature"
+```
+
+4. Push to the branch
+
+```bash
+git push origin feature/AmazingFeature
+```
+
 5. Open a Pull Request
 
 ---
 
-## 📄 License
+# 📄 License
 
-Distributed under the MIT License. See `LICENSE` for more information.
+Distributed under the MIT License.
+
+See the `LICENSE` file for more information.
+
+---
+
+<div align="center">
+
+## ⭐ Support the Project
+
+If you found KritikShoot useful, consider giving the repository a star.
+
+Built with precision, performance, and scalability in mind.
+
+</div>
