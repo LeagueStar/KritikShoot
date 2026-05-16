@@ -760,6 +760,18 @@ class InputManager {
         this._pausePressed = true;
       });
     }
+
+    // ── Quit button (mobile, visible while paused) ──────────────────────────
+    const quitBtn = document.getElementById("quitBtn");
+    if (quitBtn) {
+      quitBtn.addEventListener("touchstart", e => {
+        e.preventDefault();
+        this._quitPressed = true;
+      });
+      quitBtn.addEventListener("click", () => {
+        this._quitPressed = true;
+      });
+    }
   }
 
   /**
@@ -797,11 +809,13 @@ class UIManager {
 
     // Cache DOM references once — avoids repeated querySelector
     this._el = {
-      startScreen:  document.getElementById("startScreen"),
-      levelUp:      document.getElementById("levelUpScreen"),
-      restartBtn:   document.getElementById("restartBtn"),
-      mobileUI:     document.getElementById("mobileControls"),
-      leaderboard:  document.getElementById("localLeaderboard"),
+      startScreen:    document.getElementById("startScreen"),
+      levelUp:        document.getElementById("levelUpScreen"),
+      gameOverActions:document.getElementById("gameOverActions"),
+      restartBtn:     document.getElementById("restartBtn"),
+      menuBtn:        document.getElementById("menuBtn"),
+      mobileUI:       document.getElementById("mobileControls"),
+      leaderboard:    document.getElementById("localLeaderboard"),
     };
 
     this._bindUI();
@@ -824,12 +838,22 @@ class UIManager {
 
     // ── Restart button ───────────────────────────────────────────────────────
     document.getElementById("restartBtn").addEventListener("click", () => {
-      this._el.restartBtn.classList.add("hidden");
-      // Re-show mobile controls if needed (they may have been hidden by page flow)
+      this._el.gameOverActions.classList.add("hidden");
       if (this.game.input.isMobile || window.innerWidth <= 768) {
         this._el.mobileUI.classList.add("mobile-ui--active");
       }
       this.game.start();
+    });
+
+    // ── Main Menu button ─────────────────────────────────────────────────────
+    document.getElementById("menuBtn").addEventListener("click", () => {
+      this._el.gameOverActions.classList.add("hidden");
+      this._el.mobileUI.classList.remove("mobile-ui--active");
+      // Re-show start screen and refresh leaderboard with latest scores
+      this._renderLeaderboard();
+      this._el.startScreen.classList.remove("hidden");
+      // Stop the game loop by bumping the generation
+      this.game._gen = (this.game._gen || 0) + 1;
     });
 
     // ── Upgrade buttons ─────────────────────────────────────────────────────
@@ -858,12 +882,25 @@ class UIManager {
     this._el.levelUp.classList.remove("hidden");
   }
 
-  /** Record the score, refresh the leaderboard, show the restart button. */
+  /** Stop the loop and return to the start screen. */
+  quitToMenu() {
+    this.game._gen = (this.game._gen || 0) + 1; // kill the loop
+    this.game.isPaused = false;
+    this._el.gameOverActions.classList.add("hidden");
+    this._el.levelUp.classList.add("hidden");
+    this._el.mobileUI.classList.remove("mobile-ui--active");
+    const quitBtn = document.getElementById("quitBtn");
+    if (quitBtn) quitBtn.classList.add("hidden");
+    this._renderLeaderboard();
+    this._el.startScreen.classList.remove("hidden");
+  }
+
+  /** Record the score, refresh the leaderboard, show the game-over actions. */
   showGameOver() {
     const name  = localStorage.getItem("ks_nickname") || "Ghost";
     this._saveScore(name, this.game.wave, this.game.gameTime, this.game.player.stats.level);
     this._renderLeaderboard();
-    this._el.restartBtn.classList.remove("hidden");
+    this._el.gameOverActions.classList.remove("hidden");
   }
 
   // ── Leaderboard persistence ─────────────────────────────────────────────
@@ -1007,11 +1044,14 @@ class UIManager {
       ctx.shadowBlur  = 18;
       ctx.shadowColor = "rgba(0,229,255,0.6)";
       ctx.textAlign = "center";
-      ctx.fillText("⏸ PAUSED", g.width / 2, g.height / 2 - 20 * s);
+      ctx.fillText("⏸ PAUSED", g.width / 2, g.height / 2 - 28 * s);
       ctx.shadowBlur  = 0;
       ctx.font      = `600 ${Math.max(13, 17 * s)}px ${CONFIG.HUD_FONT}`;
       ctx.fillStyle = "rgba(232,240,254,0.6)";
-      ctx.fillText("ESC or ⏸ button to resume", g.width / 2, g.height / 2 + 16 * s);
+      ctx.fillText("ESC or ⏸ to resume", g.width / 2, g.height / 2 + 8 * s);
+      ctx.font      = `600 ${Math.max(11, 14 * s)}px ${CONFIG.HUD_FONT}`;
+      ctx.fillStyle = "rgba(232,240,254,0.35)";
+      ctx.fillText("Q — Quit to Main Menu", g.width / 2, g.height / 2 + 34 * s);
       ctx.textAlign = "left";
     }
 
@@ -1089,6 +1129,14 @@ class Game {
 
     // Generation counter — incremented on every start() to kill stale rAF loops
     this._gen = 0;
+  }
+
+  /** Show/hide the mobile quit button to match pause state. */
+  _syncQuitBtn() {
+    const btn = document.getElementById("quitBtn");
+    if (!btn) return;
+    if (this.isPaused) btn.classList.remove("hidden");
+    else               btn.classList.add("hidden");
   }
 
   // ── Canvas resize ──────────────────────────────────────────────────────────
@@ -1169,6 +1217,7 @@ class Game {
       if (this.player && this.player.alive) {
         this.isPaused = !this.isPaused;
         if (!this.isPaused) this.lastTime = performance.now();
+        this._syncQuitBtn();
       }
     }
     if (this.input._pausePressed) {
@@ -1176,7 +1225,15 @@ class Game {
       if (this.player && this.player.alive) {
         this.isPaused = !this.isPaused;
         if (!this.isPaused) this.lastTime = performance.now();
+        this._syncQuitBtn();
       }
+    }
+
+    // Q key or quit button while paused → quit to main menu
+    if ((this.input.keys["q"] || this.input._quitPressed) && this.isPaused && this.player && this.player.alive) {
+      this.input.keys["q"]    = false;
+      this.input._quitPressed = false;
+      this.ui.quitToMenu();
     }
 
     if (!this.isPaused && this.player.alive) {
