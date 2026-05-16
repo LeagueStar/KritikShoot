@@ -600,10 +600,6 @@ class Enemy {
           if (player.health <= 0) {
             player.alive  = false;
             player.health = 0;
-            if (!this.game._gameOverFired) {
-              this.game._gameOverFired = true;
-              this.game.ui.showGameOver();
-            }
           }
         }
         return;
@@ -1240,6 +1236,12 @@ class Game {
       this._update(dt);
     }
 
+    // Check for death every frame (health may have dropped inside _update)
+    if (this.player && !this.player.alive && !this._gameOverFired) {
+      this._gameOverFired = true;
+      this.ui.showGameOver();
+    }
+
     this._draw();
 
     // Always keep looping — after death the game-over overlay stays rendered
@@ -1300,10 +1302,6 @@ class Game {
               if (this.player.health <= 0 && this.player.alive) {
                 this.player.alive  = false;
                 this.player.health = 0;
-                if (!this._gameOverFired) {
-                  this._gameOverFired = true;
-                  this.ui.showGameOver();
-                }
               }
             }
           }
