@@ -63,6 +63,7 @@
     </div>
     <button id="shootBtn" class="btn btn--shoot" aria-label="Shoot">FIRE</button>
     <button id="pauseBtn" class="btn btn--pause" aria-label="Pause / Resume">⏸</button>
+    <button id="quitBtn" class="btn btn--quit hidden" aria-label="Quit to Menu">⌂</button>
   </div>
 
   <!-- =====================================================
@@ -93,11 +94,16 @@
   </div>
 
   <!-- =====================================================
-       RESTART BUTTON — appears on game over
+       GAME-OVER ACTIONS — appear on game over
   ====================================================== -->
-  <button id="restartBtn" class="btn btn--danger btn--fixed hidden" aria-label="Restart Mission">
-    ↩ Restart Mission
-  </button>
+  <div id="gameOverActions" class="game-over-actions hidden">
+    <button id="restartBtn" class="btn btn--danger" aria-label="Restart Mission">
+      ↩ Play Again
+    </button>
+    <button id="menuBtn" class="btn btn--menu" aria-label="Return to Main Menu">
+      ⌂ Main Menu
+    </button>
+  </div>
 
   <!-- Single-file game engine — deferred so DOM is ready -->
   <script src="./game.js" defer></script>
