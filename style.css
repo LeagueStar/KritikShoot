@@ -404,7 +404,7 @@ button:active {
   box-shadow: var(--glow-accent), 0 8px 32px rgba(255, 45, 85, 0.4);
 }
 
-/* Game-over action bar (Play Again + Main Menu) */
+/* Game-over action bar (Play Again + Main Menu)  works half time */
 .game-over-actions {
   position: fixed;
   bottom: calc(40px * var(--ui-scale));
