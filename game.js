@@ -6,7 +6,7 @@
  * Memory        : Object Pools for Bullets and Particles (zero GC stutter)
  * Collision     : distanceSq optimisation — avoids sqrt in hot loops
  * Rendering     : ctx.shadowBlur neon glows, layered draw order
- * Camera Shake  : sine-wave decay (smooth, not chaotic)
+ * Camera Shake  : sine-wave decay (smooth, not chaotic) (when enemies blows off)
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
