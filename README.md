@@ -13,17 +13,7 @@ An ultra-lightweight, high-performance 2D arcade shooter built entirely with van
 ## 🕹️ Gameplay Preview
 
 <!-- TIP: Record a 5-10 second GIF of your gameplay, upload it to GitHub, and link it here -->
-
-https://github.com/user-attachments/assets/03fbf3a0-84af-472a-aec5-d90084ab02ac
-
-
-
-
-
-
-
-
-![KritikShoot Gameplay Preview](https://via.placeholder.com/800x450.png?text=Add+a+Gameplay+GIF+or+Screenshot+Here)
+![KritikShoot Gameplay Preview](https://github.com/user-attachments/assets/03fbf3a0-84af-472a-aec5-d90084ab02ac)
 
 ---
 
