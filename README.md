@@ -1,3 +1,5 @@
+<div align="center">
+
 # 🚀 KritikShoot
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -6,14 +8,13 @@
 
 An ultra-lightweight, high-performance 2D arcade shooter built entirely with vanilla JavaScript and HTML5 Canvas. No heavy frameworks, no external engine overhead—just pure, hardware-accelerated gameplay straight in the browser.
 
-🔗 **[Play KritikShoot Live in Your Browser Here](https://leaguestar.github.io/KritikShoot/)**
-
+</div>
 ---
 
 ## 🕹️ Gameplay Preview
 
 <!-- TIP: Record a 5-10 second GIF of your gameplay, upload it to GitHub, and link it here -->
-![KritikShoot Gameplay Preview](https://github.com/user-attachments/assets/03fbf3a0-84af-472a-aec5-d90084ab02ac)
+https://github.com/user-attachments/assets/03fbf3a0-84af-472a-aec5-d90084ab02ac
 
 ---
 
