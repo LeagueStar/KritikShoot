@@ -1,47 +1,47 @@
 /* =============================================================
    KritikShoot — style.css
-   Architecture: CSS Custom Properties → Components → Utilities
+   Architecture : CSS Custom Properties → Components → Utilities
    Design System: Neon-Noir / Cyberpunk HUD aesthetic
-   Fonts: Orbitron (display) + Rajdhani (UI body)
+   Fonts        : Orbitron (display) + Rajdhani (UI body)
    ============================================================= */
 
+
 /* ─────────────────────────────────────────────────────────────
-   1. DESIGN TOKENS (Custom Properties)
+   1. DESIGN TOKENS
    ───────────────────────────────────────────────────────────── */
 :root {
-  /* Scale factor injected by Game.resize() for resolution-aware UI */
   --ui-scale: 1;
 
-  /* Colour Palette */
-  --col-bg:           #050810;
-  --col-bg-mid:       #0a0e1a;
-  --col-glass:        rgba(8, 14, 30, 0.72);
+  /* Palette */
+  --col-bg: #050810;
+  --col-bg-mid: #0a0e1a;
+  --col-glass: rgba(8, 14, 30, 0.72);
   --col-glass-border: rgba(0, 220, 255, 0.18);
-  --col-glass-shine:  rgba(0, 220, 255, 0.06);
+  --col-glass-shine: rgba(0, 220, 255, 0.06);
 
-  --col-primary:      #00e5ff;
-  --col-primary-dim:  rgba(0, 229, 255, 0.15);
+  --col-primary: #00e5ff;
+  --col-primary-dim: rgba(0, 229, 255, 0.15);
   --col-primary-glow: rgba(0, 229, 255, 0.55);
 
-  --col-accent:       #ff2d55;
-  --col-accent-dim:   rgba(255, 45, 85, 0.15);
-  --col-accent-glow:  rgba(255, 45, 85, 0.55);
+  --col-accent: #ff2d55;
+  --col-accent-dim: rgba(255, 45, 85, 0.15);
+  --col-accent-glow: rgba(255, 45, 85, 0.55);
 
-  --col-success:      #2ecc71;
-  --col-warn:         #f39c12;
-  --col-text:         #e8f0fe;
-  --col-text-muted:   rgba(232, 240, 254, 0.5);
+  --col-success: #2ecc71;
+  --col-warn: #f39c12;
+  --col-text: #e8f0fe;
+  --col-text-muted: rgba(232, 240, 254, 0.5);
 
   /* Typography */
   --font-display: 'Orbitron', monospace;
-  --font-ui:      'Rajdhani', sans-serif;
+  --font-ui: 'Rajdhani', sans-serif;
 
   /* Spacing */
-  --space-xs:  4px;
-  --space-sm:  8px;
-  --space-md:  16px;
-  --space-lg:  28px;
-  --space-xl:  48px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 28px;
+  --space-xl: 48px;
 
   /* Radii */
   --radius-sm: 4px;
@@ -49,24 +49,26 @@
   --radius-lg: 18px;
   --radius-pill: 9999px;
 
-  /* Shadows / Glows */
+  /* Shadows / Glows — CSS only, no canvas shadowBlur */
   --shadow-panel: 0 24px 64px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--col-glass-border);
   --glow-primary: 0 0 12px var(--col-primary-glow), 0 0 30px rgba(0, 229, 255, 0.2);
-  --glow-accent:  0 0 12px var(--col-accent-glow),  0 0 30px rgba(255, 45, 85, 0.2);
+  --glow-accent: 0 0 12px var(--col-accent-glow), 0 0 30px rgba(255, 45, 85, 0.2);
 
   /* Motion */
   --ease-snap: cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  --ease-out:  cubic-bezier(0.22, 1, 0.36, 1);
-  --dur-fast:  150ms;
-  --dur-med:   300ms;
-  --dur-slow:  500ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 150ms;
+  --dur-med: 300ms;
+  --dur-slow: 500ms;
 }
 
 
 /* ─────────────────────────────────────────────────────────────
    2. RESET & BASE
    ───────────────────────────────────────────────────────────── */
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
@@ -74,7 +76,8 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-html, body {
+html,
+body {
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -84,25 +87,22 @@ body {
   background-color: var(--col-bg);
   font-family: var(--font-ui);
   color: var(--col-text);
-  touch-action: none;          /* Suppress scroll/zoom on mobile */
-  /* Subtle scanline texture for atmosphere */
-  background-image:
-    repeating-linear-gradient(
-      0deg,
+  touch-action: none;
+  background-image: repeating-linear-gradient(0deg,
       transparent,
       transparent 3px,
       rgba(0, 229, 255, 0.012) 3px,
-      rgba(0, 229, 255, 0.012) 4px
-    );
+      rgba(0, 229, 255, 0.012) 4px);
 }
 
-/* Screen-reader only utility */
 .sr-only {
   position: absolute;
-  width: 1px; height: 1px;
-  padding: 0; margin: -1px;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
   overflow: hidden;
-  clip: rect(0,0,0,0);
+  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
 }
@@ -119,6 +119,9 @@ body {
   height: 100vh;
   z-index: 1;
   cursor: crosshair;
+  /* Prevent browser from applying its own smoothing to crisp pixel art */
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 
@@ -131,17 +134,12 @@ body {
   -webkit-backdrop-filter: blur(18px) saturate(1.4);
   border: 1px solid var(--col-glass-border);
   box-shadow: var(--shadow-panel);
-  /* Thin diagonal highlight at top to simulate glass refraction */
-  background-image: linear-gradient(
-    135deg,
-    var(--col-glass-shine) 0%,
-    transparent 60%
-  );
+  background-image: linear-gradient(135deg, var(--col-glass-shine) 0%, transparent 60%);
 }
 
 
 /* ─────────────────────────────────────────────────────────────
-   5. SCREENS (full-viewport overlays)
+   5. SCREENS
    ───────────────────────────────────────────────────────────── */
 .screen {
   position: fixed;
@@ -150,11 +148,10 @@ body {
   align-items: center;
   justify-content: center;
   z-index: 100;
-
   opacity: 1;
   visibility: visible;
   transition:
-    opacity   var(--dur-slow) var(--ease-out),
+    opacity var(--dur-slow) var(--ease-out),
     visibility var(--dur-slow) var(--ease-out);
 }
 
@@ -164,7 +161,6 @@ body {
   pointer-events: none;
 }
 
-/* Screen content wrapper */
 .screen__inner {
   width: 100%;
   max-width: 480px;
@@ -175,16 +171,14 @@ body {
   gap: var(--space-lg);
 }
 
-/* Compact variant for level-up dialog */
 .screen__inner--compact {
   max-width: 400px;
   padding: var(--space-lg);
   gap: var(--space-md);
 }
 
-/* Floating dialog variant (level-up panel) */
+/* Level-up card — floating overlay, not full-screen */
 .screen--overlay {
-  /* Override full-screen: centre as a card */
   inset: unset;
   top: 50%;
   left: 50%;
@@ -193,9 +187,9 @@ body {
   height: auto;
   border-radius: var(--radius-lg);
   transition:
-    opacity   var(--dur-med) var(--ease-out),
+    opacity var(--dur-med) var(--ease-out),
     visibility var(--dur-med) var(--ease-out),
-    transform  var(--dur-med) var(--ease-snap);
+    transform var(--dur-med) var(--ease-snap);
 }
 
 .screen--overlay.hidden {
@@ -220,7 +214,7 @@ body {
 
 
 /* ─────────────────────────────────────────────────────────────
-   6. START SCREEN — LOGO LOCKUP
+   6. LOGO LOCKUP
    ───────────────────────────────────────────────────────────── */
 .logo-lockup {
   display: flex;
@@ -247,16 +241,35 @@ body {
     0 0 20px var(--col-primary-glow),
     0 0 60px rgba(0, 229, 255, 0.3),
     0 0 100px rgba(0, 229, 255, 0.1);
-  /* Subtle flicker animation for neon feel */
   animation: neon-flicker 6s ease-in-out infinite;
+  /* will-change tells the compositor to promote to its own layer,
+     preventing repaint on the rest of the DOM during the animation */
+  will-change: opacity;
 }
 
 @keyframes neon-flicker {
-  0%, 95%, 100% { opacity: 1; }
-  96%            { opacity: 0.85; }
-  97%            { opacity: 1; }
-  98%            { opacity: 0.9; }
-  99%            { opacity: 1; }
+
+  0%,
+  95%,
+  100% {
+    opacity: 1;
+  }
+
+  96% {
+    opacity: 0.85;
+  }
+
+  97% {
+    opacity: 1;
+  }
+
+  98% {
+    opacity: 0.9;
+  }
+
+  99% {
+    opacity: 1;
+  }
 }
 
 .logo-line {
@@ -294,7 +307,7 @@ body {
   outline: none;
   transition:
     border-color var(--dur-med) var(--ease-out),
-    box-shadow   var(--dur-med) var(--ease-out);
+    box-shadow var(--dur-med) var(--ease-out);
 }
 
 .input-field::placeholder {
@@ -323,16 +336,18 @@ button {
   border-radius: var(--radius-md);
   overflow: hidden;
   transition:
-    transform      var(--dur-fast) var(--ease-snap),
-    box-shadow     var(--dur-med)  var(--ease-out),
+    transform var(--dur-fast) var(--ease-snap),
+    box-shadow var(--dur-med) var(--ease-out),
     background-color var(--dur-med) var(--ease-out);
+  /* Promote buttons to their own compositor layer to avoid layout thrash */
+  will-change: transform;
 }
 
 button:active {
   transform: scale(0.94) !important;
 }
 
-/* Primary deploy button */
+/* Primary: DEPLOY */
 .btn--primary {
   padding: calc(16px * var(--ui-scale)) calc(56px * var(--ui-scale));
   font-size: calc(1.1rem * var(--ui-scale));
@@ -348,24 +363,23 @@ button:active {
   box-shadow: var(--glow-primary), 0 8px 32px rgba(0, 229, 255, 0.45);
 }
 
-/* Animated glow shimmer behind primary button */
+/* Rotating shimmer on DEPLOY */
 .btn__glow {
   position: absolute;
   inset: -50%;
-  background: conic-gradient(
-    transparent 0deg,
-    rgba(0, 229, 255, 0.3) 90deg,
-    transparent 180deg
-  );
+  background: conic-gradient(transparent 0deg, rgba(0, 229, 255, 0.3) 90deg, transparent 180deg);
   animation: btn-spin 3s linear infinite;
   z-index: -1;
+  will-change: transform;
 }
 
 @keyframes btn-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-/* Upgrade buttons (level-up grid) */
+/* Upgrade buttons */
 .btn--upgrade {
   padding: calc(11px * var(--ui-scale)) calc(18px * var(--ui-scale));
   font-size: calc(0.95rem * var(--ui-scale));
@@ -386,7 +400,7 @@ button:active {
   transform: translateX(4px);
 }
 
-/* Danger / restart button */
+/* Danger: Play Again */
 .btn--danger {
   padding: calc(14px * var(--ui-scale)) calc(36px * var(--ui-scale));
   font-size: calc(1rem * var(--ui-scale));
@@ -400,29 +414,11 @@ button:active {
 
 .btn--danger:hover {
   background: var(--col-accent);
-  color: white;
+  color: #fff;
   box-shadow: var(--glow-accent), 0 8px 32px rgba(255, 45, 85, 0.4);
 }
 
-/* Game-over action bar (Play Again + Main Menu)  works half time */
-.game-over-actions {
-  position: fixed;
-  bottom: calc(40px * var(--ui-scale));
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 200;
-  display: flex;
-  gap: var(--space-md);
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-.game-over-actions.hidden {
-  display: none !important;
-}
-
-/* Main Menu button */
+/* Main Menu */
 .btn--menu {
   padding: calc(14px * var(--ui-scale)) calc(32px * var(--ui-scale));
   font-size: calc(1rem * var(--ui-scale));
@@ -440,7 +436,25 @@ button:active {
   box-shadow: var(--glow-primary), 0 8px 32px rgba(0, 229, 255, 0.3);
 }
 
-/* Hidden utility (JS toggles this) */
+/* Game-over action bar */
+.game-over-actions {
+  position: fixed;
+  bottom: calc(40px * var(--ui-scale));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  gap: var(--space-md);
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.game-over-actions.hidden {
+  display: none !important;
+}
+
+/* Global hidden utility */
 .hidden {
   display: none !important;
 }
@@ -456,8 +470,8 @@ button:active {
   width: 100%;
 }
 
-/* Last child spans full width when count is odd */
-.upgrade-grid > .btn--upgrade:last-child:nth-child(odd) {
+/* Last odd child spans both columns */
+.upgrade-grid>.btn--upgrade:last-child:nth-child(odd) {
   grid-column: 1 / -1;
 }
 
@@ -473,13 +487,18 @@ button:active {
   padding: var(--space-md);
   max-height: 38vh;
   overflow-y: auto;
-  /* Custom scrollbar for WebKit */
   scrollbar-width: thin;
   scrollbar-color: var(--col-primary) transparent;
 }
 
-.leaderboard::-webkit-scrollbar { width: 4px; }
-.leaderboard::-webkit-scrollbar-thumb { background: var(--col-primary); border-radius: var(--radius-pill); }
+.leaderboard::-webkit-scrollbar {
+  width: 4px;
+}
+
+.leaderboard::-webkit-scrollbar-thumb {
+  background: var(--col-primary);
+  border-radius: var(--radius-pill);
+}
 
 .leaderboard__empty {
   text-align: center;
@@ -521,14 +540,13 @@ button:active {
    11. MOBILE CONTROLS
    ───────────────────────────────────────────────────────────── */
 .mobile-ui {
-  display: none;                /* Hidden by default; shown by media query or JS class */
+  display: none;
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 50;
 }
 
-/* JS can force-show mobile controls (e.g. touch laptop at full width) */
 .mobile-ui--active {
   display: block !important;
 }
@@ -568,9 +586,11 @@ button:active {
   pointer-events: none;
   box-shadow: 0 0 12px rgba(0, 229, 255, 0.5);
   transition: width var(--dur-fast), height var(--dur-fast);
+  /* GPU layer for frequent transform updates */
+  will-change: transform;
 }
 
-/* Shoot button */
+/* FIRE button */
 .btn--shoot {
   position: absolute;
   bottom: calc(44px * var(--ui-scale));
@@ -587,9 +607,7 @@ button:active {
   pointer-events: auto;
   backdrop-filter: blur(6px);
   box-shadow: var(--glow-accent);
-  transition:
-    background var(--dur-fast),
-    box-shadow var(--dur-fast);
+  transition: background var(--dur-fast), box-shadow var(--dur-fast);
 }
 
 .btn--shoot:active {
@@ -597,7 +615,7 @@ button:active {
   box-shadow: var(--glow-accent), 0 0 32px rgba(255, 45, 85, 0.7);
 }
 
-/* Pause button (top-right on mobile) */
+/* Pause button */
 .btn--pause {
   position: absolute;
   top: calc(20px * var(--ui-scale));
@@ -615,9 +633,7 @@ button:active {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition:
-    background var(--dur-fast),
-    box-shadow var(--dur-fast);
+  transition: background var(--dur-fast), box-shadow var(--dur-fast);
 }
 
 .btn--pause:active {
@@ -625,7 +641,7 @@ button:active {
   box-shadow: var(--glow-primary), 0 0 32px rgba(0, 229, 255, 0.5);
 }
 
-/* Quit-to-menu button — appears below pause button when paused */
+/* Quit button — shown while paused */
 .btn--quit {
   position: absolute;
   top: calc(82px * var(--ui-scale));
@@ -643,9 +659,7 @@ button:active {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition:
-    background var(--dur-fast),
-    box-shadow var(--dur-fast);
+  transition: background var(--dur-fast), box-shadow var(--dur-fast);
 }
 
 .btn--quit:active {
@@ -657,8 +671,9 @@ button:active {
    12. RESPONSIVE BREAKPOINTS
    ───────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
-  /* Reveal mobile controls on small screens */
-  .mobile-ui { display: block; }
+  .mobile-ui {
+    display: block;
+  }
 
   .logo-title {
     font-size: calc(2.8rem * var(--ui-scale));
@@ -673,7 +688,7 @@ button:active {
     grid-template-columns: 1fr;
   }
 
-  .upgrade-grid > .btn--upgrade:last-child:nth-child(odd) {
+  .upgrade-grid>.btn--upgrade:last-child:nth-child(odd) {
     grid-column: unset;
   }
 }
@@ -682,6 +697,7 @@ button:active {
   .logo-title {
     font-size: 2.2rem;
   }
+
   .btn--primary {
     padding: 14px 36px;
   }
@@ -689,7 +705,7 @@ button:active {
 
 
 /* ─────────────────────────────────────────────────────────────
-   13. SCROLLBAR (Firefox global)
+   13. SCROLLBAR (Firefox)
    ───────────────────────────────────────────────────────────── */
 * {
   scrollbar-width: thin;
@@ -701,5 +717,7 @@ button:active {
    14. PRINT SUPPRESSION
    ───────────────────────────────────────────────────────────── */
 @media print {
-  body { display: none; }
+  body {
+    display: none;
+  }
 }
