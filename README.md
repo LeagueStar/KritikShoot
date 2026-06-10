@@ -9,8 +9,6 @@
 An ultra-lightweight, high-performance 2D arcade shooter built entirely with vanilla JavaScript and HTML5 Canvas. No heavy frameworks, no external engine overhead—just pure, hardware-accelerated gameplay straight in the browser.
 
 </div>
----
-
 ## 🕹️ Gameplay Preview
 
 <!-- TIP: Record a 5-10 second GIF of your gameplay, upload it to GitHub, and link it here -->
