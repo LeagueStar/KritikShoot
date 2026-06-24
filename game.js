@@ -242,6 +242,196 @@ const GlowCache = {
 
 
 // =============================================================================
+// SECTION 6b — TRAIL MANAGER
+// Ring buffer of past positions per entity → fading neon line drawn behind it.
+// =============================================================================
+class TrailManager {
+  constructor(maxLength = 10) {
+    this._maxLen = maxLength;
+    this._trails = new Map();
+  }
+
+  register(entity, color) {
+    this._trails.set(entity, { pts: [], color });
+  }
+
+  unregister(entity) {
+    this._trails.delete(entity);
+  }
+
+  push(entity) {
+    const t = this._trails.get(entity);
+    if (!t) return;
+    t.pts.push({ x: entity.x, y: entity.y });
+    if (t.pts.length > this._maxLen) t.pts.shift();
+  }
+
+  draw(ctx) {
+    for (const [, t] of this._trails) {
+      if (t.pts.length < 2) continue;
+      ctx.save();
+      ctx.shadowColor = t.color;
+      ctx.shadowBlur  = 8;
+      ctx.strokeStyle = t.color;
+      ctx.lineWidth   = 2;
+      ctx.lineCap     = "round";
+      ctx.lineJoin    = "round";
+      ctx.beginPath();
+      for (let i = 0; i < t.pts.length; i++) {
+        ctx.globalAlpha = ((i + 1) / t.pts.length) * 0.65;
+        if (i === 0) ctx.moveTo(t.pts[i].x, t.pts[i].y);
+        else         ctx.lineTo(t.pts[i].x, t.pts[i].y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  clear() { this._trails.clear(); }
+}
+
+
+// =============================================================================
+// SECTION 6c — AUDIO ENGINE
+// Dependency-free procedural sound via Web Audio API OscillatorNode.
+// All sounds are fire-and-forget: short envelope, no leaks.
+// Context is lazy-created on first play (satisfies autoplay policy).
+// =============================================================================
+class AudioEngine {
+  constructor() {
+    this._ctx = null;
+  }
+
+  _getCtx() {
+    if (!this._ctx) {
+      this._ctx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    // Resume if suspended (browser autoplay policy)
+    if (this._ctx.state === "suspended") this._ctx.resume();
+    return this._ctx;
+  }
+
+  // Shared envelope helper — connects osc → gain → dest, schedules stop
+  _play(setupFn, duration = 0.25) {
+    try {
+      const ctx  = this._getCtx();
+      const gain = ctx.createGain();
+      gain.connect(ctx.destination);
+      setupFn(ctx, gain);
+      gain.gain.setValueAtTime(0, ctx.currentTime + duration);
+      // Oscillators stop themselves via their own scheduleStop
+    } catch (e) { /* AudioContext unavailable (e.g. unit tests) */ }
+  }
+
+  // "Pew" — short square-wave chirp descending from 880 → 220 Hz
+  playShoot() {
+    this._play((ctx, gain) => {
+      const osc = ctx.createOscillator();
+      osc.type = "square";
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(220, ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.18, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+      osc.connect(gain);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.13);
+    });
+  }
+
+  // "Boom" — deep sine thud + short noise burst for player hit
+  playPlayerHit() {
+    this._play((ctx, gain) => {
+      // Sub-bass thud
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(160, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.5, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      osc.connect(gain);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.31);
+
+      // Noise crackle layer
+      const bufLen   = ctx.sampleRate * 0.15;
+      const buffer   = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+      const data     = buffer.getChannelData(0);
+      for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+      const src      = ctx.createBufferSource();
+      src.buffer     = buffer;
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.25, ctx.currentTime);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+      src.connect(noiseGain);
+      noiseGain.connect(ctx.destination);
+      src.start(ctx.currentTime);
+    }, 0.31);
+  }
+
+  // "Crunch" — filtered noise burst for enemy death
+  playEnemyDeath() {
+    this._play((ctx, gain) => {
+      const bufLen = ctx.sampleRate * 0.18;
+      const buffer = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+      const data   = buffer.getChannelData(0);
+      for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+
+      const src    = ctx.createBufferSource();
+      src.buffer   = buffer;
+
+      // Band-pass filter gives it a "crunch" character vs flat noise
+      const bpf    = ctx.createBiquadFilter();
+      bpf.type     = "bandpass";
+      bpf.frequency.value = 1800;
+      bpf.Q.value  = 1.2;
+
+      gain.gain.setValueAtTime(0.4, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+
+      src.connect(bpf);
+      bpf.connect(gain);
+      src.start(ctx.currentTime);
+    }, 0.19);
+  }
+
+  // Laser "zap" — sawtooth with rapid frequency drop, for piercing mode
+  playLaser() {
+    this._play((ctx, gain) => {
+      const osc = ctx.createOscillator();
+      osc.type  = "sawtooth";
+      osc.frequency.setValueAtTime(1200, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.22, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+      osc.connect(gain);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.09);
+    }, 0.09);
+  }
+
+  // Spread "thwump" — chord of two slightly-detuned sines for shotgun feel
+  playSpread() {
+    this._play((ctx, gain) => {
+      for (const freq of [320, 295]) {
+        const osc = ctx.createOscillator();
+        osc.type  = "triangle";
+        osc.frequency.setValueAtTime(freq, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.14);
+        const g2  = ctx.createGain();
+        g2.gain.setValueAtTime(0.18, ctx.currentTime);
+        g2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.14);
+        osc.connect(g2);
+        g2.connect(ctx.destination);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.15);
+      }
+    }, 0.15);
+  }
+}
+
+
+// =============================================================================
 // SECTION 7 — BULLET
 // FIX 3 (interpolation): prevX/prevY cached before each move.
 // FIX 4 (dead-flag):     active=false on death; pool release is caller's job.
@@ -254,18 +444,19 @@ class Bullet {
     this.prevY  = 0;
   }
 
-  init(x, y, dx, dy, size, color, damage, isEnemy) {
-    this.x       = x;
-    this.y       = y;
-    this.prevX   = x;   // no interpolation artifact on first frame
-    this.prevY   = y;
-    this.dx      = dx;
-    this.dy      = dy;
-    this.size    = size;
-    this.color   = color;
-    this.damage  = damage;
-    this.isEnemy = isEnemy;
-    this.active  = true;
+  init(x, y, dx, dy, size, color, damage, isEnemy, piercing = false) {
+    this.x        = x;
+    this.y        = y;
+    this.prevX    = x;
+    this.prevY    = y;
+    this.dx       = dx;
+    this.dy       = dy;
+    this.size     = size;
+    this.color    = color;
+    this.damage   = damage;
+    this.isEnemy  = isEnemy;
+    this.piercing = piercing;   // laser rounds pass through enemies
+    this.active   = true;
   }
 
   // FIX 3: cache previous position before integrating
@@ -364,6 +555,10 @@ class Player {
     this.upgrades = { speed: 0, health: 0, damage: 0, fireRate: 0, bulletSpeed: 0, critChance: 0, lifesteal: 0 };
     this.buffs    = { shield: 0, tripleShot: 0, speedBoost: 0, rage: 0 };
     this._lastShot = 0;
+
+    // Weapon: "default" | "spread" | "laser"
+    // Cycle with Q key; powerup "weapon_spread" / "weapon_laser" also sets it.
+    this.weapon   = "default";
   }
 
   get maxHealth()  { return CONFIG.PLAYER_BASE_HEALTH + this.upgrades.health * 20; }
@@ -414,6 +609,7 @@ class Player {
 
   _shoot(input) {
     this._lastShot = this.game.gameTime;
+    const audio    = this.game.audio;
 
     let angle;
     if (input.isMobile && this.game.enemies.length > 0) {
@@ -427,11 +623,54 @@ class Player {
       angle = Math.atan2(input.mouseY - this.y, input.mouseX - this.x);
     }
 
-    const angles = (this.buffs.tripleShot > 0)
+    // ── Weapon dispatch ────────────────────────────────────────────────────
+    if (this.weapon === "spread") {
+      // Shotgun: 5 pellets in a 40° cone, lower individual damage
+      const PELLETS = 5;
+      const SPREAD  = 0.35; // half-angle in radians
+      audio.playSpread();
+      for (let i = 0; i < PELLETS; i++) {
+        const spread = (i / (PELLETS - 1) - 0.5) * SPREAD * 2;
+        const ang    = angle + spread;
+        const isCrit = Math.random() < this.critChance;
+        const isRage = this.buffs.rage > 0;
+        const dmg    = ((isRage || isCrit) ? this.damage * 2 : this.damage) * 0.55;
+        const color  = isCrit ? "#f1c40f" : isRage ? "#ff4757" : "#ff9f43";
+        const b      = this.game.bulletPool.get();
+        b.init(this.x, this.y,
+          Math.cos(ang) * this.bulletSpd * (0.85 + Math.random() * 0.3),
+          Math.sin(ang) * this.bulletSpd * (0.85 + Math.random() * 0.3),
+          (isCrit ? 6 : 4) * this.game.uiScale, color, dmg, false, false);
+        this.game.bullets.push(b);
+        this.game.trailMgr.register(b, b.color);
+      }
+      return;
+    }
+
+    if (this.weapon === "laser") {
+      // Piercing laser: one fat, fast bolt that passes through enemies
+      audio.playLaser();
+      const isCrit = Math.random() < this.critChance;
+      const isRage = this.buffs.rage > 0;
+      const dmg    = (isRage || isCrit) ? this.damage * 1.8 : this.damage * 1.4;
+      const color  = "#00e5ff";
+      const b      = this.game.bulletPool.get();
+      b.init(this.x, this.y,
+        Math.cos(angle) * this.bulletSpd * 1.5,
+        Math.sin(angle) * this.bulletSpd * 1.5,
+        (isCrit ? 9 : 7) * this.game.uiScale, color, dmg, false, true /* piercing */);
+      this.game.bullets.push(b);
+      this.game.trailMgr.register(b, b.color);
+      return;
+    }
+
+    // ── Default gun (original logic, tripleShot buff preserved) ───────────
+    audio.playShoot();
+    const baseAngles = (this.buffs.tripleShot > 0)
       ? [angle, angle - 0.2, angle + 0.2]
       : [angle];
 
-    for (const ang of angles) {
+    for (const ang of baseAngles) {
       const isCrit = Math.random() < this.critChance;
       const isRage = this.buffs.rage > 0;
       const dmg    = (isRage || isCrit) ? this.damage * 2 : this.damage;
@@ -441,6 +680,7 @@ class Player {
       const b = this.game.bulletPool.get();
       b.init(this.x, this.y, Math.cos(ang) * this.bulletSpd, Math.sin(ang) * this.bulletSpd, size, color, dmg, false);
       this.game.bullets.push(b);
+      this.game.trailMgr.register(b, b.color);
     }
   }
 
@@ -578,9 +818,16 @@ class Enemy {
     this._lastShot = game.gameTime;
 
     switch (type) {
-      case "tank":
+      case "tank":                              // Slow, massive HP, heavy melee
         this.color = "#3498db"; this.size = 30 * game.uiScale; this.speed = 40;
-        this.hp = baseHp * 2; this.shootDelay = 3.0; break;
+        this.hp = baseHp * 2.5; this.shootDelay = 99; break;  // no shooting
+      case "rusher":                            // NEW: Fragile but very fast charger
+        this.color = "#e74c3c"; this.size = 14 * game.uiScale; this.speed = 240;
+        this.hp = baseHp * 0.4; this.shootDelay = 99; break;  // melee only
+      case "ranged":                            // NEW: Kites at distance, fires often
+        this.color = "#00e5ff"; this.size = 18 * game.uiScale; this.speed = 60;
+        this.hp = baseHp * 0.8; this.shootDelay = 1.2;
+        this._preferredDist = 260 * game.uiScale; break;
       case "fast":
         this.color = "#f1c40f"; this.size = 16 * game.uiScale; this.speed = 185;
         this.hp = baseHp * 0.6; this.shootDelay = 1.5; break;
@@ -602,9 +849,32 @@ class Enemy {
     this.prevX = this.x;
     this.prevY = this.y;
 
-    const angle = Math.atan2(player.y - this.y, player.x - this.x);
-    let sdx = Math.cos(angle) * this.speed;
-    let sdy = Math.sin(angle) * this.speed;
+    const toDx  = player.x - this.x;
+    const toDy  = player.y - this.y;
+    const dist  = Math.hypot(toDx, toDy) || 1;
+    const angle = Math.atan2(toDy, toDx);
+
+    // ── Ranged: orbit at preferred distance — approach if too far, retreat if too close
+    let sdx, sdy;
+    if (this.type === "ranged" && this._preferredDist) {
+      const diff = dist - this._preferredDist;
+      // Strafe component (perpendicular to player direction)
+      const strafeAng = angle + Math.PI * 0.5;
+      const strafeStr = 0.6;
+      if (Math.abs(diff) > 40) {
+        // Move toward/away radially + strafe
+        const radialDir = diff > 0 ? 1 : -1;
+        sdx = Math.cos(angle) * this.speed * radialDir + Math.cos(strafeAng) * this.speed * strafeStr;
+        sdy = Math.sin(angle) * this.speed * radialDir + Math.sin(strafeAng) * this.speed * strafeStr;
+      } else {
+        // In band: pure strafe to keep circling
+        sdx = Math.cos(strafeAng) * this.speed;
+        sdy = Math.sin(strafeAng) * this.speed;
+      }
+    } else {
+      sdx = Math.cos(angle) * this.speed;
+      sdy = Math.sin(angle) * this.speed;
+    }
 
     const SEP_RADIUS = this.size * 3.0;
     const SEP_FORCE  = this.speed * 0.8;
@@ -644,14 +914,21 @@ class Enemy {
         if (dSq < blastRadSq && player.alive) {
           const falloff = 1 - (Math.sqrt(dSq) / Math.sqrt(blastRadSq));
           player.health -= this.damage * 2 * falloff;
+          this.game.triggerDamageFlash(1.5);
+          this.game.audio.playPlayerHit();
           this.game.cameraShake = Math.max(this.game.cameraShake, CONFIG.SHAKE_MAX * 1.5);
           if (player.health <= 0) { player.alive = false; player.health = 0; }
         }
         return;
       }
 
+      // tank and rusher are melee-only (shootDelay = 99, never reached, but guard anyway)
+      if (this.type === "tank" || this.type === "rusher") return;
+
       const shootAngle = Math.atan2(player.y - this.y, player.x - this.x);
-      const angles     = (this.type === "spread")
+
+      // ranged fires a fast single accurate shot; spread fires 3-way
+      const angles = (this.type === "spread")
         ? [shootAngle, shootAngle - 0.28, shootAngle + 0.28]
         : [shootAngle];
 
@@ -662,20 +939,64 @@ class Enemy {
           Math.sin(ang) * CONFIG.ENEMY_BULLET_SPEED,
           5 * this.game.uiScale, this.color, this.damage, true);
         this.game.bullets.push(b);
+        this.game.trailMgr.register(b, b.color);
       }
     }
   }
 
-  // FIX 3: interpolated draw position
+  // Neon-geometry draw: rotating polygon silhouette with glow stroke + inner core
   draw(ctx, alpha) {
     const rx   = Utils.lerp(this.prevX, this.x, alpha);
     const ry   = Utils.lerp(this.prevY, this.y, alpha);
-    const glow = GlowCache.get(this.color, this.size, this.size * 1.4);
+    const s    = this.size;
+    const t    = this.game.gameTime;
+
+    // Pre-rendered halo
+    const glow = GlowCache.get(this.color, s, s * 1.4);
     ctx.drawImage(glow.canvas, rx - glow.half, ry - glow.half);
-    ctx.fillStyle = this.color;
+
+    ctx.save();
+    ctx.translate(rx, ry);
+
+    const rotSpeed = this.type === "fast" || this.type === "rusher" ? 4.0
+                   : this.type === "tank" ? 0.3 : 1.2;
+    ctx.rotate(t * rotSpeed);
+
+    const sides = this.type === "tank" ? 6
+                : this.type === "fast" || this.type === "rusher" ? 3
+                : this.type === "spread" ? 5
+                : this.type === "exploder" ? 4
+                : this.type === "ranged" ? 8   // octagon — reads as "technological"
+                : 4;
+
     ctx.beginPath();
-    ctx.arc(rx, ry, this.size, 0, Math.PI * 2);
+    for (let i = 0; i < sides; i++) {
+      const a  = (i / sides) * Math.PI * 2 - Math.PI / 2;
+      const px = Math.cos(a) * s;
+      const py = Math.sin(a) * s;
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+
+    // Dark hollow fill + neon stroke
+    ctx.fillStyle   = "rgba(5,8,16,0.7)";
     ctx.fill();
+    ctx.strokeStyle = this.color;
+    ctx.lineWidth   = 2.5;
+    ctx.shadowColor = this.color;
+    ctx.shadowBlur  = 14;
+    ctx.stroke();
+
+    // Pulsing inner energy core
+    ctx.shadowBlur  = 10;
+    ctx.fillStyle   = this.color;
+    ctx.globalAlpha = 0.5 + Math.sin(t * 6 + this.x) * 0.25;
+    ctx.beginPath();
+    ctx.arc(0, 0, s * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    ctx.restore();
   }
 }
 
@@ -699,63 +1020,125 @@ class InputManager {
   }
 
   _bindListeners() {
-    const canvas   = document.getElementById("gameCanvas");
-    const joy      = document.getElementById("joystick");
-    const knob     = joy.querySelector(".joystick__knob");
-    const shootBtn = document.getElementById("shootBtn");
+  const canvas   = document.getElementById("gameCanvas");
+  const joy      = document.getElementById("joystick");
+  const knob     = joy.querySelector(".joystick__knob");
+  const shootBtn = document.getElementById("shootBtn");
 
-    window.addEventListener("keydown", e => { this.keys[e.key.toLowerCase()] = true; });
-    window.addEventListener("keyup",   e => { this.keys[e.key.toLowerCase()] = false; });
+  window.addEventListener("keydown", e => { this.keys[e.key.toLowerCase()] = true; });
+  window.addEventListener("keyup",   e => { this.keys[e.key.toLowerCase()] = false; });
 
-    window.addEventListener("mousemove", e => {
-      const rect  = canvas.getBoundingClientRect();
-      this.mouseX = e.clientX - rect.left;
-      this.mouseY = e.clientY - rect.top;
-    });
-    window.addEventListener("mousedown", () => { this.isShooting = true; });
-    window.addEventListener("mouseup",   () => { this.isShooting = false; });
+  window.addEventListener("mousemove", e => {
+    const rect  = canvas.getBoundingClientRect();
+    this.mouseX = e.clientX - rect.left;
+    this.mouseY = e.clientY - rect.top;
+  });
+  window.addEventListener("mousedown", () => { this.isShooting = true; });
+  window.addEventListener("mouseup",   () => { this.isShooting = false; });
 
-    let jBaseX = 0, jBaseY = 0;
+  // ── Touch IDs — track left (joystick) vs right (aim) independently ────────
+  let jBaseX = 0, jBaseY = 0;
+  let _joyTouchId  = null;  // touch id owning the joystick
+  let _aimTouchId  = null;  // touch id owning the aim zone
 
-    joy.addEventListener("touchstart", e => {
-      e.preventDefault();
-      this.joystickActive = true;
-      joy.classList.add("joystick--active");
-      const r = joy.getBoundingClientRect();
-      jBaseX  = r.left + r.width  / 2;
-      jBaseY  = r.top  + r.height / 2;
-      this._updateJoystick(e.touches[0], jBaseX, jBaseY, knob);
-    });
+  const _isRightSide = touch =>
+    touch.clientX > window.innerWidth * 0.45;   // right 55 % = aim zone
 
-    document.addEventListener("touchmove", e => {
-      if (!this.joystickActive) return;
-      e.preventDefault();
-      this._updateJoystick(e.touches[0], jBaseX, jBaseY, knob);
-    }, { passive: false });
-
-    document.addEventListener("touchend", () => {
-      this.joystickActive = false;
-      this.joystickX = 0;
-      this.joystickY = 0;
-      knob.style.transform = "translate(-50%, -50%)";
-      joy.classList.remove("joystick--active");
-    });
-
-    shootBtn.addEventListener("touchstart", e => { e.preventDefault(); this.isShooting = true; });
-    shootBtn.addEventListener("touchend",   e => { e.preventDefault(); this.isShooting = false; });
-
-    const pauseBtn = document.getElementById("pauseBtn");
-    if (pauseBtn) {
-      pauseBtn.addEventListener("touchstart", e => { e.preventDefault(); this._pausePressed = true; });
-      pauseBtn.addEventListener("click", () => { this._pausePressed = true; });
+  canvas.addEventListener("touchstart", e => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    for (const t of e.changedTouches) {
+      if (_isRightSide(t) && _aimTouchId === null) {
+        // Right side: aim + fire
+        _aimTouchId      = t.identifier;
+        this.mouseX      = t.clientX - rect.left;
+        this.mouseY      = t.clientY - rect.top;
+        this.isShooting  = true;
+      }
     }
+  }, { passive: false });
 
-    const quitBtn = document.getElementById("quitBtn");
-    if (quitBtn) {
-      quitBtn.addEventListener("touchstart", e => { e.preventDefault(); this._quitPressed = true; });
-      quitBtn.addEventListener("click", () => { this._quitPressed = true; });
+  canvas.addEventListener("touchmove", e => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    for (const t of e.changedTouches) {
+      if (t.identifier === _aimTouchId) {
+        this.mouseX = t.clientX - rect.left;
+        this.mouseY = t.clientY - rect.top;
+      }
     }
+  }, { passive: false });
+
+  canvas.addEventListener("touchend", e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === _aimTouchId) {
+        _aimTouchId     = null;
+        this.isShooting = false;
+      }
+    }
+  });
+
+  // ── Joystick (left zone) ──────────────────────────────────────────────────
+  joy.addEventListener("touchstart", e => {
+    e.preventDefault();
+    if (_joyTouchId !== null) return;
+    const t = e.changedTouches[0];
+    _joyTouchId         = t.identifier;
+    this.joystickActive = true;
+    joy.classList.add("joystick--active");
+    const r = joy.getBoundingClientRect();
+    jBaseX  = r.left + r.width  / 2;
+    jBaseY  = r.top  + r.height / 2;
+    this._updateJoystick(t, jBaseX, jBaseY, knob);
+  }, { passive: false });
+
+  document.addEventListener("touchmove", e => {
+    if (!this.joystickActive) return;
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      if (t.identifier === _joyTouchId)
+        this._updateJoystick(t, jBaseX, jBaseY, knob);
+    }
+  }, { passive: false });
+
+  document.addEventListener("touchend", e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === _joyTouchId) {
+        _joyTouchId         = null;
+        this.joystickActive = false;
+        this.joystickX      = 0;
+        this.joystickY      = 0;
+        // Auto-fire stops when joystick lifts (if aim touch isn't held)
+        if (_aimTouchId === null) this.isShooting = false;
+        knob.style.transform = "translate(-50%, -50%)";
+        joy.classList.remove("joystick--active");
+      }
+    }
+  });
+
+  // Auto-fire: joystick movement triggers shooting on mobile
+  const _origUpdateJoy = this._updateJoystick.bind(this);
+  this._updateJoystick = (touch, bx, by, k) => {
+    _origUpdateJoy(touch, bx, by, k);
+    const moving = Math.hypot(this.joystickX, this.joystickY) > 8;
+    if (moving) this.isShooting = true;
+  };
+
+  shootBtn.addEventListener("touchstart", e => { e.preventDefault(); this.isShooting = true; });
+  shootBtn.addEventListener("touchend",   e => { e.preventDefault(); this.isShooting = false; });
+
+  const pauseBtn = document.getElementById("pauseBtn");
+  if (pauseBtn) {
+    pauseBtn.addEventListener("touchstart", e => { e.preventDefault(); this._pausePressed = true; });
+    pauseBtn.addEventListener("click", () => { this._pausePressed = true; });
   }
+
+  const quitBtn = document.getElementById("quitBtn");
+  if (quitBtn) {
+    quitBtn.addEventListener("touchstart", e => { e.preventDefault(); this._quitPressed = true; });
+    quitBtn.addEventListener("click", () => { this._quitPressed = true; });
+  }
+}
 
   _updateJoystick(touch, baseX, baseY, knob) {
     const maxRadius = 40;
@@ -931,6 +1314,13 @@ class UIManager {
     ctx.fillStyle = "rgba(0,229,255,0.8)";
     ctx.fillText(`XP  ${p.stats.xp} / ${p.stats.xpToNext}`, m, xbY + xbH + 4);
 
+    // Weapon mode indicator
+    const weaponLabel = { default: "GUN", spread: "SHOTGUN", laser: "LASER" }[p.weapon] || p.weapon.toUpperCase();
+    const weaponColor = p.weapon === "laser" ? "#00e5ff" : p.weapon === "spread" ? "#ff9f43" : "#e8f0fe";
+    ctx.font      = `700 ${Math.max(11, 13 * s)}px ${CONFIG.HUD_FONT}`;
+    ctx.fillStyle = weaponColor;
+    ctx.fillText(`⚔ ${weaponLabel}  [TAB]`, m, xbY + xbH + 4 + 22 * s);
+
     let buffY = xbY + xbH + 28 * s;
     for (const key in p.buffs) {
       if (p.buffs[key] > 0) {
@@ -1007,16 +1397,19 @@ class Game {
 
     this.input = new InputManager();
     this.ui    = new UIManager(this);
+    this.audio = new AudioEngine();
 
     this.bulletPool   = new ObjectPool(Bullet,   CONFIG.POOL_BULLETS);
     this.particlePool = new ObjectPool(Particle, CONFIG.POOL_PARTICLES);
 
     this.spatialHash = new SpatialHash(80);
+    this.trailMgr    = new TrailManager(10);
 
     this.fsm = new GameFSM();
     this._wireFSM();
 
     this.cameraShake = 0;
+    this.damageFlash = 0;   // seconds remaining for red vignette
     this._shakeTime  = 0;
     this._rafId      = null;
 
@@ -1033,6 +1426,10 @@ class Game {
     this._resize();
     window.addEventListener("resize", () => this._resize());
   }
+  triggerDamageFlash(intensity = 1.0) {
+  this.damageFlash = Math.min(1, this.damageFlash + 0.35 * intensity);
+  this.cameraShake = Math.max(this.cameraShake, CONFIG.SHAKE_MAX * 0.6 * intensity);
+}
 
   _wireFSM() {
     this.fsm
@@ -1079,6 +1476,7 @@ class Game {
     this.bullets   = [];
     this.particles = [];
     this.walls     = [];
+    this.crates    = [];
     this.powerups  = [];
 
     this.wave      = 1;
@@ -1086,8 +1484,10 @@ class Game {
     this.gameTime  = 0;
     this.lastTime  = performance.now();
     this.cameraShake  = 0;
+    this.damageFlash  = 0;
     this._shakeTime   = 0;
     this._accumulator = 0;
+    this.trailMgr.clear();
 
     // FIX 4: reset dead-slot counters
     this._deadBullets   = 0;
@@ -1142,6 +1542,14 @@ class Game {
       this.input._quitPressed = false;
       this.ui.quitToMenu();
     }
+
+    // Weapon cycle: Tab key (not Q, which is reserved for quit-in-pause)
+    if (this.input.keys["tab"] && state === GameState.PLAYING) {
+      this.input.keys["tab"] = false;
+      const modes = ["default", "spread", "laser"];
+      const idx   = modes.indexOf(this.player.weapon);
+      this.player.weapon = modes[(idx + 1) % modes.length];
+    }
   }
 
   // ── Fixed-step physics update ──────────────────────────────────────────────
@@ -1169,15 +1577,19 @@ class Game {
       const bx0 = b.x;
       const by0 = b.y;
       b.update(dt);
+      this.trailMgr.push(b);
 
       let hit = false;
 
       const wall = this.checkWallCollision(b.x, b.y, b.size);
       if (wall) {
-        wall.hp -= b.damage;
-        if (wall.hp <= 0) {
-          const wi = this.walls.indexOf(wall);
-          if (wi !== -1) Utils.removeFast(this.walls, wi);
+        // Only destructible walls have an hp property; crates are indestructible
+        if (wall.hp !== undefined) {
+          wall.hp -= b.damage;
+          if (wall.hp <= 0) {
+            const wi = this.walls.indexOf(wall);
+            if (wi !== -1) Utils.removeFast(this.walls, wi);
+          }
         }
         this.spawnParticles(b.x, b.y, b.color, 5);
         hit = true;
@@ -1193,6 +1605,8 @@ class Game {
             if (t >= 0) {
               if (this.player.buffs.shield <= 0) {
                 this.player.health -= b.damage;
+                this.triggerDamageFlash(1.0);
+                this.audio.playPlayerHit();
                 this.cameraShake = Math.max(this.cameraShake, 5);
               }
               hit = true;
@@ -1215,7 +1629,7 @@ class Game {
             const t = Utils.sweepCircle(bx0, by0, b.x, b.y, e.x, e.y, b.size + e.size);
             if (t >= 0) {
               e.hp -= b.damage;
-              hit   = true;
+              if (!b.piercing) hit = true;  // piercing rounds continue through
               if (this.player.lifesteal > 0) {
                 this.player.health = Math.min(
                   this.player.maxHealth,
@@ -1224,7 +1638,7 @@ class Game {
               }
               const ei = this.enemies.indexOf(e);
               if (e.hp <= 0 && ei !== -1) this._handleEnemyDeath(e, ei);
-              break;
+              if (!b.piercing) break;  // non-piercing: stop checking after first hit
             }
           }
         }
@@ -1238,6 +1652,7 @@ class Game {
         // FIX 4: mark dead + release to pool; do NOT splice here
         b.active = false;
         this.bulletPool.release(b);
+        this.trailMgr.unregister(b);
         this._deadBullets++;
       }
     }
@@ -1340,6 +1755,47 @@ class Game {
       ctx.fillRect(w.x, w.y - 9, w.w * Utils.clamp(w.hp / w.maxHp, 0, 1), 4);
     }
 
+    // ── Crates & Pillars (indestructible environment) ─────────────────────
+    if (this.crates) {
+      for (const c of this.crates) {
+        if (c.isPillar) {
+          // Pillar: dark core + bright neon outline
+          ctx.fillStyle   = "#0d1220";
+          ctx.fillRect(c.x, c.y, c.w, c.h);
+          ctx.strokeStyle = "rgba(0,229,255,0.55)";
+          ctx.lineWidth   = 2;
+          ctx.shadowColor = "#00e5ff";
+          ctx.shadowBlur  = 8;
+          ctx.strokeRect(c.x + 1, c.y + 1, c.w - 2, c.h - 2);
+          ctx.shadowBlur  = 0;
+          // Vertical light stripe
+          ctx.fillStyle = "rgba(0,229,255,0.08)";
+          ctx.fillRect(c.x + c.w * 0.35, c.y, c.w * 0.3, c.h);
+        } else {
+          // Crate: warm steel box with rivets
+          ctx.fillStyle = "#1c2535";
+          ctx.fillRect(c.x, c.y, c.w, c.h);
+          ctx.strokeStyle = "rgba(255,180,60,0.5)";
+          ctx.lineWidth   = 1.5;
+          ctx.strokeRect(c.x + 1, c.y + 1, c.w - 2, c.h - 2);
+          // Cross hatching
+          ctx.strokeStyle = "rgba(255,180,60,0.15)";
+          ctx.lineWidth   = 1;
+          ctx.beginPath();
+          ctx.moveTo(c.x, c.y); ctx.lineTo(c.x + c.w, c.y + c.h);
+          ctx.moveTo(c.x + c.w, c.y); ctx.lineTo(c.x, c.y + c.h);
+          ctx.stroke();
+          // Corner rivets
+          ctx.fillStyle = "rgba(255,180,60,0.55)";
+          const rv = 3;
+          for (const [rx, ry] of [[c.x+rv, c.y+rv],[c.x+c.w-rv, c.y+rv],[c.x+rv, c.y+c.h-rv],[c.x+c.w-rv, c.y+c.h-rv]]) {
+            ctx.beginPath(); ctx.arc(rx, ry, rv * 0.7, 0, Math.PI * 2); ctx.fill();
+          }
+        }
+      }
+      ctx.shadowBlur = 0;
+    }
+
     // ── Powerups (batched by color) ───────────────────────────────────────
     if (this.powerups.length > 0) {
       const pulse   = Math.sin(this.gameTime * 5) * 2;
@@ -1363,6 +1819,9 @@ class Game {
     for (const p of this.particles) p.draw(ctx, alpha);
     ctx.globalAlpha = 1;
 
+    // ── Bullet trails ─────────────────────────────────────────────────────
+    this.trailMgr.draw(ctx);
+
     // ── Bullets: glow layer — FIX 3: draw() lerps; FIX 4: skips inactive ─
     for (const b of this.bullets) {
       if (!b.active) continue;
@@ -1383,29 +1842,8 @@ class Game {
     }
     ctx.fill();
 
-    // ── Enemies: glow layer then batched body fills ───────────────────────
-    for (const e of this.enemies) {
-      const rx   = Utils.lerp(e.prevX, e.x, alpha);
-      const ry   = Utils.lerp(e.prevY, e.y, alpha);
-      const glow = GlowCache.get(e.color, e.size, e.size * 1.4);
-      ctx.drawImage(glow.canvas, rx - glow.half, ry - glow.half);
-    }
-    const enemyByColor = new Map();
-    for (const e of this.enemies) {
-      if (!enemyByColor.has(e.color)) enemyByColor.set(e.color, []);
-      enemyByColor.get(e.color).push(e);
-    }
-    for (const [color, group] of enemyByColor) {
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      for (const e of group) {
-        const rx = Utils.lerp(e.prevX, e.x, alpha);
-        const ry = Utils.lerp(e.prevY, e.y, alpha);
-        ctx.moveTo(rx + e.size, ry);
-        ctx.arc(rx, ry, e.size, 0, Math.PI * 2);
-      }
-      ctx.fill();
-    }
+    // ── Enemies: neon polygon draw (each enemy handles its own glow) ─────
+    for (const e of this.enemies) e.draw(ctx, alpha);
 
     // ── Enemy HP bars (interpolated positions) ────────────────────────────
     ctx.fillStyle = CONFIG.WALL_HP_COLOR;
@@ -1431,6 +1869,21 @@ class Game {
     ctx.restore();
 
     this.ui.drawHUD(ctx);
+
+    // ── Damage vignette flash ──────────────────────────────────────────────
+    if (this.damageFlash > 0) {
+      const a    = Utils.clamp(this.damageFlash, 0, 0.72);
+      const grad = ctx.createRadialGradient(
+        this.width / 2, this.height / 2, this.height * 0.25,
+        this.width / 2, this.height / 2, this.height * 0.85
+      );
+      grad.addColorStop(0,   "rgba(255,0,30,0)");
+      grad.addColorStop(0.6, `rgba(255,0,30,${(a * 0.55).toFixed(3)})`);
+      grad.addColorStop(1,   `rgba(255,0,30,${a.toFixed(3)})`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, this.width, this.height);
+      this.damageFlash = Math.max(0, this.damageFlash - 1.8 / 60);
+    }
   }
 
   // ── Spawning helpers ───────────────────────────────────────────────────────
@@ -1441,14 +1894,23 @@ class Game {
     const ey   = side === 2 ? 0 : side === 3 ? this.height : Math.random() * this.height;
     const wf   = Math.max(1, Math.log(this.wave + 1)) * CONFIG.WAVE_MULTIPLIER;
     const r    = Math.random();
-    const type = r < 0.15 ? "tank" : r < 0.30 ? "fast" : r < 0.45 ? "spread" : r < 0.60 ? "exploder" : "normal";
+    const type = r < 0.12 ? "tank"
+               : r < 0.25 ? "rusher"
+               : r < 0.40 ? "ranged"
+               : r < 0.52 ? "fast"
+               : r < 0.64 ? "spread"
+               : r < 0.74 ? "exploder"
+               : "normal";
     this.enemies.push(new Enemy(this, ex, ey, type, wf));
   }
 
   _spawnWalls() {
-    this.walls = [];
-    const count = Math.floor(Math.random() * 6) + 5;
-    for (let i = 0; i < count; i++) {
+    this.walls   = [];
+    this.crates  = [];   // indestructible static obstacles (crates & pillars)
+
+    // ── Destructible walls (existing behaviour) ────────────────────────────
+    const wCount = Math.floor(Math.random() * 6) + 5;
+    for (let i = 0; i < wCount; i++) {
       const w = 100 + Math.random() * 110;
       const h = 18  + Math.random() * 28;
       this.walls.push({
@@ -1459,15 +1921,45 @@ class Game {
         maxHp: 10,
       });
     }
+
+    // ── Indestructible crates / pillars ────────────────────────────────────
+    // Mix of square "crates" and taller "pillar" rectangles
+    const cCount = Math.floor(Math.random() * 5) + 4;
+    const margin = 60;
+    for (let i = 0; i < cCount; i++) {
+      const isPillar = Math.random() < 0.35;
+      const w = isPillar ? 22 + Math.random() * 14
+                         : 38 + Math.random() * 30;
+      const h = isPillar ? 70 + Math.random() * 50
+                         : w * (0.8 + Math.random() * 0.4); // near-square
+      this.crates.push({
+        x: Math.random() * (this.width  - w - margin * 2) + margin,
+        y: Math.random() * (this.height - h - margin * 2) + margin,
+        w, h,
+        isPillar,
+      });
+    }
   }
 
   spawnParticles(x, y, color, count = 20) {
+    // Standard scatter
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const speed = Math.random() * 3.5 + 0.8;
+      const speed = Math.random() * 4.5 + 0.8;
       const p     = this.particlePool.get();
       p.init(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed,
-        color, Math.random() * 4 + 1.5, Math.random() * 0.5 + 0.4);
+        color, Math.random() * 4 + 1.5, Math.random() * 0.55 + 0.35);
+      this.particles.push(p);
+    }
+
+    // Ring burst — evenly-spaced white shards flying out fast
+    const shards = 12;
+    for (let i = 0; i < shards; i++) {
+      const angle = (i / shards) * Math.PI * 2;
+      const speed = 6.5 + Math.random() * 2.5;
+      const p     = this.particlePool.get();
+      p.init(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed,
+        "#ffffff", 2.5, 0.4 + Math.random() * 0.2);
       this.particles.push(p);
     }
   }
@@ -1475,6 +1967,11 @@ class Game {
   checkWallCollision(x, y, size) {
     for (const w of this.walls) {
       if (Utils.circleRect(x, y, size, w.x, w.y, w.w, w.h)) return w;
+    }
+    if (this.crates) {
+      for (const c of this.crates) {
+        if (Utils.circleRect(x, y, size, c.x, c.y, c.w, c.h)) return c;
+      }
     }
     return null;
   }
@@ -1487,6 +1984,7 @@ class Game {
     this.kills++;
     this.player.addXP(10 + Math.floor(Math.log2(this.wave + 1)) * 2);
     this.spawnParticles(enemy.x, enemy.y, enemy.color, 22);
+    this.audio.playEnemyDeath();
     Utils.removeFast(this.enemies, index);
   }
 
