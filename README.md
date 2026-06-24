@@ -1,56 +1,81 @@
 <div align="center">
 
-# 🚀 KritikShoot
+# 🌌 KritikShoot 
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Platform: Web](https://img.shields.io/badge/Platform-Web-blue.svg)]()
-[![Language: JavaScript](https://img.shields.io/badge/Language-JavaScript-F7DF1E.svg?logo=javascript&logoColor=black)]()
+**A high-octane, dependency-free HTML5 top-down shooter.**
 
-An ultra-lightweight, high-performance 2D arcade shooter built entirely with vanilla JavaScript and HTML5 Canvas. No heavy frameworks, no external engine overhead—just pure, hardware-accelerated gameplay straight in the browser.
+[![Play Game](https://img.shields.io/badge/Play-Now-00e5ff?style=for-the-badge)](https://LeagueStar.github.io/KritikShoot)
+[![JavaScript](https://img.shields.io/badge/JavaScript-ES6+-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)]()
+[![HTML5 Canvas](https://img.shields.io/badge/HTML5-Canvas-E34F26?style=for-the-badge&logo=html5&logoColor=white)]()
+
+*Intense wave-based survival. Neon geometry. Pure arcade juice.*
+
+<br />
+
+<img src="https://via.placeholder.com/800x400/050810/00e5ff?text=Drop+a+cool+gameplay+GIF+here" alt="KritikShoot Gameplay Banner" width="100%">
+
+<br />
 
 </div>
 
----
+## ✨ About The Game
 
+**KritikShoot** is a hyper-optimized, web-based arcade shooter built entirely from scratch without external frameworks[cite: 1]. Survive endless waves of geometric enemies, upgrade your ship, and chase high scores in a visually striking "Neon Geometry" world[cite: 1]. 
 
-## 🕹️ Gameplay Preview
-
-<!-- TIP: Record a 5-10 second GIF of your gameplay, upload it to GitHub, and link it here -->
-https://github.com/user-attachments/assets/03fbf3a0-84af-472a-aec5-d90084ab02ac
+Designed for both desktop and mobile, it features a custom-built object pooling system, spatial hashing, and temporal rendering interpolation to guarantee a buttery-smooth 60+ FPS experience even on low-end devices[cite: 1].
 
 ---
 
-## ✨ Core Features
+## 🚀 Key Features
 
-*   **Responsive Canvas Rendering:** Utilizes HTML5 Canvas optimized for smooth 60 FPS rendering and fluid animation loops.
-*   **Dynamic Entity Management:** Clean collision handling and life-cycle management for players, projectiles, and scaling enemy waves.
-*   **Zero Dependencies:** Built from scratch using native web technologies, ensuring instant load times and optimal performance.
-*   **Mobile Friendly Setup:** Configured with a `.nojekyll` manifest to bypass Jekyll build processing, optimizing deployment for GitHub Pages.
+### 🎨 **Neon Arcade Aesthetics**
+*   **Fighter-Jet Hull:** Pilot a sharp, swept-back delta ship with dark strokes and dynamic thruster flames[cite: 1].
+*   **Game "Juice":** Visceral feedback featuring massive particle bursts, camera screenshake, glowing bullet trails, and red damage vignette flashes[cite: 1].
+*   **Canvas Glows:** Extensive use of `shadowBlur` and radial gradients cached to off-screen canvases for high-performance neon lighting[cite: 1].
+
+### 💥 **Deep Gameplay & Upgrades**
+*   **Diverse Arsenal:** Cycle between the Default Blaster, a wide-arc Spread Shotgun, and a Piercing Laser that melts through hordes[cite: 1].
+*   **Dynamic Enemies:** Face off against fragile Rushers, heavy Tanks, kiting Ranged attackers, and unpredictable Exploders[cite: 1].
+*   **RPG Mechanics:** Earn XP, level up mid-combat, and invest in 7 different stats (Speed, Damage, Fire Rate, Lifesteal, etc.)[cite: 1].
+*   **Powerups:** Turn the tide with temporary buffs like Rage, Triple Shot, Shields, and Speed Boosts[cite: 1].
+
+### 🎧 **Dependency-Free Audio**
+*   **Procedural Web Audio:** All sound effects are generated dynamically using the native Web Audio API (`OscillatorNode`)[cite: 1].
+*   Experience retro synth "pews", sub-bass thuds on player hits, and filtered noise-burst crunches for enemy deaths—all without loading a single `.mp3` or `.wav`[cite: 1].
 
 ---
 
-## 🎮 How to Play
+## 🕹️ Controls
 
-| Action | Control |
-| :--- | :--- |
-| **Move Up / Down** | `W` / `S` or `Up Arrow` / `Down Arrow` |
-| **Move Left / Right** | `A` / `D` or `Left Arrow` / `Right Arrow` |
-| **Aim** | `Mouse Cursor` |
-| **Fire Projectile** | `Left Mouse Click` / `Spacebar` |
+Seamlessly swap between desktop and mobile devices.
+
+| Action | Desktop (Mouse & Keyboard) | Mobile (Touch) |
+| :--- | :--- | :--- |
+| **Movement** | `W` `A` `S` `D` / Arrow Keys | Left-side Virtual Joystick[cite: 1] |
+| **Aim** | Mouse cursor | Right-side Screen Tap[cite: 1] |
+| **Shoot** | Left Mouse Button | Auto-fires while aiming/moving[cite: 1] |
+| **Switch Weapon**| `TAB` | Auto-equips via UI/Powerups[cite: 1] |
+| **Pause** | `ESC` | Pause Button[cite: 1] |
 
 ---
 
-## 🛠️ Tech Stack & Architecture
+## ⚙️ Under The Hood (v3 Engine Optimizations)
 
-*   **Frontend Interface:** HTML5, CSS3 Custom Properties (Variables)
-*   **Game Logic Engine:** Vanilla JavaScript (ES6+)
-*   **Deployment:** GitHub Pages 
+While KritikShoot looks simple, the underlying engine is engineered for maximum browser performance:
 
-### File Structure Overview
-```text
-├── .nojekyll       # Bypasses Jekyll for seamless GitHub Pages deployment
-├── LICENSE         # Open-source license terms
-├── README.md       # Project documentation
-├── index.html      # Game viewport canvas wrapper
-├── style.css       # Layout styles and canvas responsiveness
-└── game.js         # Core game loop, input handling, and state logic
+*   **Fixed-Step Physics & Interpolation:** Physics run at a fixed 60Hz step (`1/60`), while the `draw()` function lerps entity positions between previous and current frames based on a sub-tick alpha accumulator. This completely eliminates micro-stutters on 120Hz/144Hz displays[cite: 1].
+*   **Zero-Allocation Game Loop:** 
+    *   **Object Pooling:** Bullets and particles are drawn from pre-allocated arrays (`ObjectPool`), preventing runtime memory allocation and garbage collection spikes[cite: 1].
+    *   **Dead-Flag Compaction:** Arrays are never modified with costly `splice()` calls during gameplay. Dead entities are flagged as `active = false` and skipped during rendering. When the pool crosses a dead-slot threshold (`35%`), the array is bulk-compacted in a single linear pass[cite: 1].
+    *   **Hoisted Sets:** Collision detection utilizes a hoisted, cleared `Set` rather than instantiating new `Set` objects every tick[cite: 1].
+*   **Spatial Hash Grid:** Entities are sorted into an $80 \times 80$ spatial grid, reducing collision checks from $O(n^2)$ to $O(n)$[cite: 1].
+
+---
+
+## 🛠️ Quick Start
+
+Because KritikShoot is entirely vanilla HTML/JS, there are no build steps, node modules, or bundlers required.
+
+1. Clone the repository:
+```bash
+   git clone [https://github.com/LeagueStar/KritikShoot.git](https://github.com/LeagueStar/KritikShoot.git)
