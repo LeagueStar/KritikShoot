@@ -1,197 +1,262 @@
 <div align="center">
 
-# 🚀 KritikShoot
+# 🛸 KritikShoot
 
-### A modern top-down survival shooter built from scratch with Vanilla JavaScript & HTML5 Canvas.
+### Neon-Noir Survival Shooter
 
-Fight endless enemy waves, defeat bosses, unlock upgrades, and survive as long as possible.
+*A lightning-fast, highly optimized top-down arena shooter built entirely with Vanilla JavaScript.*
 
-<img src="assets/gameplay.gif" width="850">
+<p>
+  <img src="https://img.shields.io/github/license/LeagueStar/KritikShoot?style=for-the-badge">
+  <img src="https://img.shields.io/github/stars/LeagueStar/KritikShoot?style=for-the-badge">
+  <img src="https://img.shields.io/github/forks/LeagueStar/KritikShoot?style=for-the-badge">
+  <img src="https://img.shields.io/github/languages/top/LeagueStar/KritikShoot?style=for-the-badge">
+</p>
 
-<br>
-
-![JavaScript](https://img.shields.io/badge/JavaScript-ES6-yellow?style=for-the-badge)
-![Canvas](https://img.shields.io/badge/HTML5-Canvas-orange?style=for-the-badge)
-![Zero Dependencies](https://img.shields.io/badge/Dependencies-None-success?style=for-the-badge)
-![License](https://img.shields.io/github/license/LeagueStar/KritikShoot?style=for-the-badge)
+> ⚡ No Game Engine • No Images • No Audio Assets • Pure HTML5 Canvas
 
 </div>
 
 ---
 
-# 🎮 About
+# 🌌 Overview
 
-**KritikShoot** is a fast-paced neon-themed survival shooter built entirely from scratch using **Vanilla JavaScript** and the **HTML5 Canvas API**.
+**KritikShoot** is a fast-paced **Neon-Noir / Cyberpunk** survival shooter where you pilot a sleek delta-wing fighter through endless waves of glowing geometric enemies.
 
-No Phaser.
+Fight to survive, level up during each run, unlock powerful upgrades, defeat massive bosses, and earn permanent upgrades that make every future run stronger.
 
-No PixiJS.
-
-No game engine.
-
-Every gameplay system—including rendering, AI, collisions, particles, audio, upgrades, and UI—was implemented manually.
-
-The goal is simple:
-
-> **Survive increasingly difficult waves, defeat bosses, upgrade your ship, and chase the highest score.**
+Everything is built from scratch using **Vanilla JavaScript**, **HTML5 Canvas**, and the **Web Audio API**—without relying on any external game engine or rendering framework.
 
 ---
 
 # ✨ Features
 
-## Combat
+## 🎮 Gameplay
 
-- ⚡ Fast-paced twin-stick shooting
-- 🎯 Mouse aiming
-- 🔥 Multiple weapons
-  - Default Rifle
-  - Spread Shot
-  - Laser Cannon
-- 💥 Critical hits
-- ❤️ Lifesteal
-- 🛡 Shield buffs
-- 🚀 Speed boosts
-- 🔺 Triple Shot
-- Rage Mode
+- 🌊 Endless wave-based survival
+- 👑 Boss battles every 5th wave
+- ⭐ RPG-style leveling system
+- 🎁 Upgrade selection after every level
+- 🪙 Persistent meta-progression
+- 🏆 Local leaderboard
+- 💾 Automatic save using LocalStorage
 
 ---
 
-## Enemies
+## 🔫 Weapons
 
-Fight against multiple enemy archetypes.
+Switch between multiple weapons during gameplay.
 
-- 🟢 Standard
-- 🔴 Rusher
-- 🔵 Tank
-- 🟣 Spread Shooter
-- 🟠 Exploder
-- 🔷 Ranged AI
+- 🔴 Rapid Fire Rifle
+- 🟠 5-Pellet Spread Shotgun
+- 🔵 Piercing Laser Cannon
+
+Each weapon offers a completely different combat style.
+
+---
+
+## ⚡ Power-ups
+
+Collect temporary buffs including
+
+- 🛡 Shield
+- 🚀 Speed Boost
+- 🔥 Rage Mode
+- 🎯 Triple Shot
+- ❤️ Health Pickup
+- ⭐ XP Boost
+
+---
+
+## 👾 Enemy Types
 
 Every enemy behaves differently.
 
+| Enemy | Description |
+|--------|-------------|
+| 🟢 Basic | Standard chaser |
+| 🟡 Fast | Quick melee attacker |
+| 🔵 Tank | High health, slow movement |
+| 🔴 Rusher | Extremely fast charger |
+| 🔷 Ranged | Keeps distance while shooting |
+| 🟣 Spread | Fires a three-way bullet spread |
+| 🟠 Exploder | Self-destructs with massive AoE damage |
+| 👑 Boss | Multi-phase bullet hell encounter |
+
 ---
 
-## Boss Battles
+# 🚀 Boss Battles
 
-Every few waves a massive boss appears featuring
+Every fifth wave introduces a massive boss featuring multiple attack phases.
 
-- Multi-phase attacks
-- Bullet hell patterns
-- Dash attacks
-- High health
-- Dynamic difficulty
+### ☢ Radial Hell
+
+- Expanding bullet rings
+- Increasing bullet density
+- Bullet-hell style combat
+
+### ⚡ Charge Dash
+
+- Telegraph warning
+- High-speed dash attack
+- Requires careful positioning to dodge
 
 ---
 
-## Progression
+# 📈 Progression
 
-Gain XP by defeating enemies.
+## During a Run
 
-Level up and choose upgrades such as
+Earn XP by defeating enemies.
+
+Leveling up lets you choose upgrades like
+
+- ⚡ Fire Rate
+- ❤️ Max Health
+- 💥 Damage
+- 🚀 Bullet Speed
+- 🏃 Movement Speed
+- 🎯 Critical Chance
+- 🩸 Lifesteal
+
+---
+
+## Permanent Progression
+
+Every completed run rewards Coins.
+
+Spend Coins on permanent upgrades including
 
 - Fire Rate
+- Health
 - Damage
-- Bullet Speed
-- Critical Chance
-- Lifesteal
 - Speed
-- Max Health
+- Bullet Speed
 
-Collect coins to permanently improve your ship through the persistent upgrade shop.
-
----
-
-## Visual Effects
-
-- ✨ Neon rendering
-- 💥 Particle engine
-- 🌈 Glow sprite caching
-- 🎥 Camera shake
-- 🚀 Bullet trails
-- 💫 Dynamic lighting
-- Smooth interpolation
-- High refresh rate rendering
+All progress is automatically saved using **LocalStorage**.
 
 ---
 
-## Audio
+# 🎨 Visuals
 
-Procedural sound engine using the **Web Audio API**
+KritikShoot features a clean cyberpunk visual style built entirely with Canvas.
 
-No external sound assets.
+Effects include
 
-Every sound effect is generated in real time.
+- ✨ Neon glow rendering
+- 🌠 Bullet trails
+- 💥 Dynamic particle explosions
+- 📳 Camera shake
+- 🔥 Thruster animations
+- 💎 Glassmorphism menus
+- 🌌 Animated HUD
+- ⚡ Smooth interpolation rendering
 
-- Shoot
-- Laser
-- Spread Shot
-- Enemy Death
-- Player Damage
+No sprite sheets or texture files are used.
 
 ---
 
-## Performance
+# 🔊 Audio
 
-The game includes several optimization techniques commonly found in real game engines.
+Every sound effect is generated procedurally using the **Web Audio API**.
+
+Includes
+
+- Laser shots
+- Explosions
+- Enemy destruction
+- Player damage
+- Spread weapons
+
+No audio assets are included.
+
+---
+
+# ⚙ Performance Optimizations
+
+KritikShoot was engineered for smooth gameplay even with hundreds of entities on screen.
+
+### 🚀 Engine Features
 
 - Object Pooling
 - Spatial Hash Grid
-- Continuous Collision Detection
+- Continuous Collision Detection (CCD)
+- Cached Glow Sprite Rendering
 - Dead Object Compaction
-- Render Interpolation
-- Cached Glow Sprites
-- Memory Reuse
+- Temporal Interpolation
 - Optimized Collision Detection
+- Finite State Machine (FSM)
 
----
-
-# 📸 Screenshots
-
-Replace with your screenshots.
-
-```text
-assets/
-
-gameplay.gif
-menu.png
-boss.png
-shop.png
-```
+Designed to minimize garbage collection and maintain stable frame rates.
 
 ---
 
 # 🎮 Controls
 
-| Action | Key |
-|---------|-----|
-| Move | WASD |
-| Aim | Mouse |
-| Shoot | Left Click |
-| Change Weapon | Q |
-| Pause | ESC |
+## Desktop
 
-Mobile controls are also supported.
+| Key | Action |
+|------|--------|
+| **W A S D** | Move |
+| **Arrow Keys** | Move |
+| **Mouse** | Aim |
+| **Left Click** | Shoot |
+| **Q** | Change Weapon |
+| **ESC** | Pause |
 
 ---
 
-# 🛠 Technologies
+## Mobile
 
-- Vanilla JavaScript (ES6)
-- HTML5 Canvas
-- Web Audio API
-- Local Storage
+- 🎮 Virtual Joystick
+- 🔥 Fire Button
+- ⏸ Pause Button
+
+Optimized for touch devices.
+
+---
+
+# 📸 Gameplay
+
+> Replace these placeholders with screenshots or GIFs.
+
+## Main Menu
+
+```
+assets/menu.png
+```
+
+## Gameplay
+
+```
+assets/gameplay.gif
+```
+
+## Boss Fight
+
+```
+assets/boss.png
+```
+
+## Upgrade Screen
+
+```
+assets/upgrades.png
+```
+
+---
+
+# 🛠 Built With
+
 - HTML5
 - CSS3
-
-No frameworks.
-
-No libraries.
-
-No engines.
+- Vanilla JavaScript (ES6)
+- HTML5 Canvas API
+- Web Audio API
 
 ---
 
-# 🚀 Running
+# 🚀 Getting Started
 
 Clone the repository
 
@@ -199,29 +264,27 @@ Clone the repository
 git clone https://github.com/LeagueStar/KritikShoot.git
 ```
 
-Open the project
+Navigate into the project
 
 ```bash
 cd KritikShoot
 ```
 
-Start a local server
+Run a local server
 
-Python
-
-```bash
-python -m http.server
-```
-
-or
-
-Node
+Using Node
 
 ```bash
-npx serve
+npx serve .
 ```
 
-Visit
+or using Python
+
+```bash
+python -m http.server 8000
+```
+
+Open your browser and visit
 
 ```
 http://localhost:8000
@@ -232,91 +295,70 @@ http://localhost:8000
 # 📂 Project Structure
 
 ```text
-KritikShoot
+KritikShoot/
 │
 ├── assets/
 ├── game.js
 ├── style.css
 ├── index.html
-└── README.md
-```
-
----
-
-# 🧠 Architecture
-
-The project is built around several reusable engine components.
-
-```
-Game
-│
-├── Game FSM
-├── Spatial Hash Grid
-├── Object Pool
-├── Audio Engine
-├── Trail Manager
-├── Particle Engine
-├── Meta Progression
-├── Enemy AI
-├── Boss AI
-├── Weapon System
-├── Upgrade System
-└── UI System
+├── README.md
+└── LICENSE
 ```
 
 ---
 
 # 🎯 Roadmap
 
-- [ ] More bosses
-- [ ] More weapons
-- [ ] Additional maps
-- [ ] Online leaderboard
-- [ ] Save files
-- [ ] Multiplayer
-- [ ] Steam release
-
----
-
-# ⭐ Why this project?
-
-Unlike many browser shooters, **KritikShoot** focuses on building engine systems manually rather than relying on external frameworks.
-
-The project demonstrates topics such as:
-
-- Game architecture
-- Collision systems
-- AI behaviours
-- Rendering optimization
-- Memory management
-- Canvas graphics
-- Procedural audio
-- Performance optimization
-
-making it both a playable game and a learning resource.
+- [ ] Additional Bosses
+- [ ] New Weapons
+- [ ] More Enemy Variants
+- [ ] Achievements
+- [ ] Online Leaderboards
+- [ ] Daily Challenges
+- [ ] Multiple Maps
+- [ ] Co-op Multiplayer
 
 ---
 
 # 🤝 Contributing
 
-Pull requests are welcome.
+Contributions are welcome!
 
-Feel free to improve gameplay, optimize performance, or add new enemies and weapons.
+1. Fork the repository.
+2. Create a feature branch.
+
+```bash
+git checkout -b feature/NewFeature
+```
+
+3. Commit your changes.
+
+```bash
+git commit -m "Add NewFeature"
+```
+
+4. Push your branch.
+
+```bash
+git push origin feature/NewFeature
+```
+
+5. Open a Pull Request.
 
 ---
 
-# 📜 License
+# ⭐ Support
 
-MIT License
+If you enjoyed this project, consider leaving a ⭐ on the repository.
+
+It helps the project reach more developers and motivates future updates.
 
 ---
 
 <div align="center">
 
-### Built with ❤️ using nothing but JavaScript & HTML5 Canvas
+## Built with ❤️ by **LeagueStar**
 
-**Made by LeagueStar**
-
-⭐ Star the repository if you enjoyed the project.
+**Happy Shooting! 🚀**
 
 </div>
