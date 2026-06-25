@@ -1,33 +1,193 @@
 <div align="center">
-  <h1>KritikShoot 🚀</h1>
-  <p><b>Survive. Upgrade. Dominate.</b></p>
-  <p>
-    <img src="https://img.shields.io/badge/Status-Active-success?style=for-the-badge" alt="Status" />
-    <img src="https://img.shields.io/badge/Vanilla_JS-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black" alt="JavaScript" />
-    <img src="https://img.shields.io/badge/HTML5_Canvas-E34F26?style=for-the-badge&logo=html5&logoColor=white" alt="HTML5" />
-  </p>
-</div>
 
-> A high-performance, dependency-free HTML5 Canvas survival shooter. Face endless waves of neon geometry, conquer multi-phase bosses, and build the ultimate fighter jet in a slick Cyberpunk HUD aesthetic.
+# 🎯 KritikShoot
+
+### Fast-paced top-down survival shooter built with JavaScript & HTML5 Canvas.
+
+Survive endless enemy waves, collect powerful upgrades, and chase the highest score.
+
+<p>
+  <img src="https://img.shields.io/github/license/LeagueStar/KritikShoot?style=for-the-badge">
+  <img src="https://img.shields.io/github/stars/LeagueStar/KritikShoot?style=for-the-badge">
+  <img src="https://img.shields.io/github/forks/LeagueStar/KritikShoot?style=for-the-badge">
+  <img src="https://img.shields.io/github/languages/top/LeagueStar/KritikShoot?style=for-the-badge">
+</p>
+
+</div>
 
 ---
 
-### ✨ Features
-* **Endless Survival:** Fight escalating geometric swarms and dynamic spawns.
-* **Epic Boss Fights:** Face multi-phase bosses every 5 waves (Bullet Hell & Dashes).
-* **Meta-Progression:** Earn coins on death to buy persistent upgrades (HP, Damage, Speed).
-* **In-Run Leveling:** Collect XP gems for temporary rogue-lite stat buffs.
-* **Dynamic Arsenal:** Switch between Blaster, Shotgun, and Piercing Lasers.
+## 🎮 About
 
-### 🕹️ Controls
-| Action | Desktop | Mobile |
-| :--- | :--- | :--- |
-| **Move** | `WASD` / `Arrows` | Virtual Joystick (Left) |
-| **Aim & Fire** | `Mouse` + `Click` | Touch & Drag (Right) |
-| **Weapon** | `TAB` | Auto-unlocks |
-| **Pause** | `ESC` | UI Button |
+**KritikShoot** is a fast-paced 2D survival shooter where your goal is simple:
 
-### 🚀 Quick Start
-1. **Clone the repo:**
+> **Stay alive as long as possible.**
+
+Fight increasingly difficult enemy waves, collect power-ups, upgrade your abilities, and push for a new high score.
+
+Built entirely with **Vanilla JavaScript** and the **HTML5 Canvas API**—no game engine required.
+
+---
+
+## ✨ Features
+
+- ⚡ Smooth top-down combat
+- 👾 Endless enemy waves
+- 💥 Multiple power-ups
+- 📈 Progressive difficulty
+- ❤️ Health & survival mechanics
+- 🏆 High score system
+- 🌐 Leaderboard support
+- 🎯 Responsive controls
+- 🚀 Lightweight (no frameworks)
+
+---
+
+## 📸 Preview
+
+> Add gameplay screenshots or GIFs here.
+
+```
+assets/
+└── preview.gif
+```
+
+Example:
+
+```md
+<p align="center">
+  <img src="assets/preview.gif" width="800">
+</p>
+```
+
+---
+
+## 🕹️ Controls
+
+| Key | Action |
+|------|--------|
+| **W A S D** | Move |
+| **Mouse** | Aim |
+| **Left Click** | Shoot |
+| **Shift** *(optional)* | Dash / Sprint |
+
+---
+
+## 🚀 Getting Started
+
+Clone the repository
+
 ```bash
-   git clone [https://github.com/LeagueStar/KritikShoot.git](https://github.com/LeagueStar/KritikShoot.git) ```
+git clone https://github.com/LeagueStar/KritikShoot.git
+```
+
+Go into the project
+
+```bash
+cd KritikShoot
+```
+
+Start a local server
+
+Using Python
+
+```bash
+python -m http.server
+```
+
+or using Node
+
+```bash
+npx serve
+```
+
+Then open
+
+```
+http://localhost:8000
+```
+
+---
+
+## 🛠 Built With
+
+- HTML5
+- CSS3
+- JavaScript (ES6)
+- HTML5 Canvas API
+
+---
+
+## 📂 Project Structure
+
+```text
+KritikShoot/
+│
+├── assets/
+├── js/
+├── css/
+├── index.html
+└── README.md
+```
+
+---
+
+## 🎯 Roadmap
+
+- [ ] More enemy types
+- [ ] Boss battles
+- [ ] New weapons
+- [ ] Upgrade tree
+- [ ] Sound settings
+- [ ] Mobile support
+- [ ] Achievements
+- [ ] Save progress
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome.
+
+1. Fork the repository
+2. Create your feature branch
+
+```bash
+git checkout -b feature/AmazingFeature
+```
+
+3. Commit your changes
+
+```bash
+git commit -m "Add AmazingFeature"
+```
+
+4. Push to your branch
+
+```bash
+git push origin feature/AmazingFeature
+```
+
+5. Open a Pull Request
+
+---
+
+## ⭐ Support
+
+If you enjoyed this project, consider giving it a **⭐ Star**.
+
+It helps the project reach more developers.
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License.
+
+---
+
+<div align="center">
+
+Made with ❤️ by **LeagueStar**
+
+</div>
