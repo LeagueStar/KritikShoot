@@ -1,81 +1,71 @@
-<div align="center">
+# KritikShoot 🚀
 
-# 🌌 KritikShoot 
+![KritikShoot](https://img.shields.io/badge/Status-Active-success) ![JavaScript](https://img.shields.io/badge/Language-Vanilla%20JS-F7DF1E) ![HTML5 Canvas](https://img.shields.io/badge/Graphics-HTML5%20Canvas-E34F26)
 
-**A high-octane, dependency-free HTML5 top-down shooter.**
+**KritikShoot** is a high-performance, dependency-free HTML5 Canvas top-down survival shooter. Survive endless waves of geometric neon enemies, defeat challenging multi-phase bosses, and earn coins to permanently upgrade your fighter jet. 
 
-[![Play Game](https://img.shields.io/badge/Play-Now-00e5ff?style=for-the-badge)](https://LeagueStar.github.io/KritikShoot)
-[![JavaScript](https://img.shields.io/badge/JavaScript-ES6+-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)]()
-[![HTML5 Canvas](https://img.shields.io/badge/HTML5-Canvas-E34F26?style=for-the-badge&logo=html5&logoColor=white)]()
+Designed with a sleek Neon-Noir/Cyberpunk aesthetic, KritikShoot features a custom-built 2D game engine optimized for high refresh rates and minimal garbage collection.
 
-*Intense wave-based survival. Neon geometry. Pure arcade juice.*
+## ✨ Features
 
-<br />
+### 🎮 Gameplay
+* **Endless Wave Survival:** Fight through increasingly difficult waves with dynamic enemy spawning.
+* **Boss Encounters:** Every 5th wave features a Boss with massive health pools and multi-phase attack patterns (Radial Bullet Hell & Telegraphed Charge Dashes).
+* **Meta-Progression (Coin Shop):** Earn coins based on your score and wave reached. Spend them in the main menu to buy persistent upgrades (Max HP, Damage, Fire Rate, Speed).
+* **In-Run Leveling:** Collect XP gems from fallen enemies to level up and choose temporary run-based stat buffs.
+* **Weapon Loadouts:** Cycle between Default (Blaster), Spread (Shotgun), and Piercing Laser modes.
+* **Powerups:** Find drops for Shields, Triple Shot, Speed Boosts, and Rage mode.
 
-<img src="https://via.placeholder.com/800x400/050810/00e5ff?text=Drop+a+cool+gameplay+GIF+here" alt="KritikShoot Gameplay Banner" width="100%">
-
-<br />
-
-</div>
-
-## ✨ About The Game
-
-**KritikShoot** is a hyper-optimized, web-based arcade shooter built entirely from scratch without external frameworks[cite: 1]. Survive endless waves of geometric enemies, upgrade your ship, and chase high scores in a visually striking "Neon Geometry" world[cite: 1]. 
-
-Designed for both desktop and mobile, it features a custom-built object pooling system, spatial hashing, and temporal rendering interpolation to guarantee a buttery-smooth 60+ FPS experience even on low-end devices[cite: 1].
-
----
-
-## 🚀 Key Features
-
-### 🎨 **Neon Arcade Aesthetics**
-*   **Fighter-Jet Hull:** Pilot a sharp, swept-back delta ship with dark strokes and dynamic thruster flames[cite: 1].
-*   **Game "Juice":** Visceral feedback featuring massive particle bursts, camera screenshake, glowing bullet trails, and red damage vignette flashes[cite: 1].
-*   **Canvas Glows:** Extensive use of `shadowBlur` and radial gradients cached to off-screen canvases for high-performance neon lighting[cite: 1].
-
-### 💥 **Deep Gameplay & Upgrades**
-*   **Diverse Arsenal:** Cycle between the Default Blaster, a wide-arc Spread Shotgun, and a Piercing Laser that melts through hordes[cite: 1].
-*   **Dynamic Enemies:** Face off against fragile Rushers, heavy Tanks, kiting Ranged attackers, and unpredictable Exploders[cite: 1].
-*   **RPG Mechanics:** Earn XP, level up mid-combat, and invest in 7 different stats (Speed, Damage, Fire Rate, Lifesteal, etc.)[cite: 1].
-*   **Powerups:** Turn the tide with temporary buffs like Rage, Triple Shot, Shields, and Speed Boosts[cite: 1].
-
-### 🎧 **Dependency-Free Audio**
-*   **Procedural Web Audio:** All sound effects are generated dynamically using the native Web Audio API (`OscillatorNode`)[cite: 1].
-*   Experience retro synth "pews", sub-bass thuds on player hits, and filtered noise-burst crunches for enemy deaths—all without loading a single `.mp3` or `.wav`[cite: 1].
-
----
+### 🛠️ Custom Engine Tech
+* **Zero Dependencies:** 100% Vanilla JavaScript, HTML, and CSS.
+* **Procedural Web Audio:** All sound effects (lasers, explosions, UI clicks) are generated dynamically using the Web Audio API `OscillatorNode` (no external audio files needed).
+* **Micro-Optimized Physics & Rendering:**
+  * **Temporal Interpolation:** Sub-tick rendering ensures perfectly smooth movement on 120Hz/144Hz monitors.
+  * **Spatial Hash Grid:** O(1) broad-phase collision detection handles hundreds of entities efficiently.
+  * **Object Pooling & Dead-Flag Compaction:** Arrays are bulk-compacted and objects are recycled to eliminate JavaScript Garbage Collection (GC) micro-stutters.
+* **Global Leaderboards:** Local storage caching with a built-in REST API hook ready for Supabase integration.
 
 ## 🕹️ Controls
 
-Seamlessly swap between desktop and mobile devices.
+KritikShoot features responsive controls for both desktop and mobile devices.
 
-| Action | Desktop (Mouse & Keyboard) | Mobile (Touch) |
-| :--- | :--- | :--- |
-| **Movement** | `W` `A` `S` `D` / Arrow Keys | Left-side Virtual Joystick[cite: 1] |
-| **Aim** | Mouse cursor | Right-side Screen Tap[cite: 1] |
-| **Shoot** | Left Mouse Button | Auto-fires while aiming/moving[cite: 1] |
-| **Switch Weapon**| `TAB` | Auto-equips via UI/Powerups[cite: 1] |
-| **Pause** | `ESC` | Pause Button[cite: 1] |
+### Desktop
+* **Move:** `W` `A` `S` `D` or `Arrow Keys`
+* **Aim & Shoot:** `Mouse Cursor` & `Left Click`
+* **Switch Weapon:** `TAB`
+* **Pause:** `ESC`
 
----
+### Mobile (Touch)
+* **Move:** Virtual Joystick (Left side of the screen)
+* **Aim & Shoot:** Touch and drag anywhere on the right side of the screen
+* **UI Controls:** On-screen buttons for pausing and manual firing.
 
-## ⚙️ Under The Hood (v3 Engine Optimizations)
+## 🚀 Running Locally
 
-While KritikShoot looks simple, the underlying engine is engineered for maximum browser performance:
+Because the game uses ES modules and the Fetch API (for the leaderboard), it needs to be run through a local web server (opening the `index.html` directly in the browser via `file://` will result in CORS errors).
 
-*   **Fixed-Step Physics & Interpolation:** Physics run at a fixed 60Hz step (`1/60`), while the `draw()` function lerps entity positions between previous and current frames based on a sub-tick alpha accumulator. This completely eliminates micro-stutters on 120Hz/144Hz displays[cite: 1].
-*   **Zero-Allocation Game Loop:** 
-    *   **Object Pooling:** Bullets and particles are drawn from pre-allocated arrays (`ObjectPool`), preventing runtime memory allocation and garbage collection spikes[cite: 1].
-    *   **Dead-Flag Compaction:** Arrays are never modified with costly `splice()` calls during gameplay. Dead entities are flagged as `active = false` and skipped during rendering. When the pool crosses a dead-slot threshold (`35%`), the array is bulk-compacted in a single linear pass[cite: 1].
-    *   **Hoisted Sets:** Collision detection utilizes a hoisted, cleared `Set` rather than instantiating new `Set` objects every tick[cite: 1].
-*   **Spatial Hash Grid:** Entities are sorted into an $80 \times 80$ spatial grid, reducing collision checks from $O(n^2)$ to $O(n)$[cite: 1].
-
----
-
-## 🛠️ Quick Start
-
-Because KritikShoot is entirely vanilla HTML/JS, there are no build steps, node modules, or bundlers required.
-
-1. Clone the repository:
+1. **Clone the repository:**
 ```bash
    git clone [https://github.com/LeagueStar/KritikShoot.git](https://github.com/LeagueStar/KritikShoot.git)
+   cd KritikShoot
+2. **Start a local web server:**
+   * **If using VS Code:** Install the Live Server extension and click "Go Live".
+   * **If using Python:** ```bash
+     python -m http.server 8000
+     ```
+   * **If using Node.js:** ```bash
+     npx serve .
+     ```
+
+3. **Open your browser:** Navigate to `http://localhost:8000` (or the port provided by your server).
+
+## 🗄️ Setting up the Leaderboard (Supabase)
+
+The game includes frontend logic to post high scores to a REST endpoint on Game Over. To activate this:
+
+1. Create a [Supabase](https://supabase.com/) project and set up a `scores` table with the following columns: `name` (text), `wave` (int), `time` (float), `level` (int), `kills` (int).
+2. Open `game.js` and locate the `_postScoreRemote` function inside the `UIManager` class.
+3. Replace the placeholder URLs and Keys with your project's details:
+   ```javascript
+   const LEADERBOARD_URL = "https://YOUR_PROJECT.supabase.co/rest/v1/scores";
+   const ANON_KEY        = "YOUR_SUPABASE_ANON_KEY";
