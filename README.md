@@ -1,364 +1,78 @@
-<div align="center">
+🛸 KritikShoot
+Neon-Noir Survival Shooter
 
-# 🛸 KritikShoot
+A lightning-fast, highly optimized top-down arena shooter built entirely without external libraries or image assets.
 
-### Neon-Noir Survival Shooter
+🌌 Overview
+KritikShoot is a high-octane survival game featuring a sleek "Neon-Noir / Cyberpunk HUD aesthetic"[cite: 3]. You pilot a sharp, swept-back delta-wing fighter[cite: 1], battling relentless swarms of neon geometric enemies[cite: 1]. Survive as long as possible, gather XP to level up mid-run, and earn coins to purchase persistent meta-upgrades[cite: 1].
 
-*A lightning-fast, highly optimized top-down arena shooter built entirely with Vanilla JavaScript.*
+✨ Key Features
+Dependency-Free Engine: Built purely with vanilla JavaScript, HTML5 Canvas, and CSS3[cite: 1, 2, 3].
 
-<p>
-  <img src="https://img.shields.io/github/license/LeagueStar/KritikShoot?style=for-the-badge">
-  <img src="https://img.shields.io/github/stars/LeagueStar/KritikShoot?style=for-the-badge">
-  <img src="https://img.shields.io/github/forks/LeagueStar/KritikShoot?style=for-the-badge">
-  <img src="https://img.shields.io/github/languages/top/LeagueStar/KritikShoot?style=for-the-badge">
-</p>
+Procedural Audio: 100% synthesized, dependency-free sound effects (lasers, explosions, hits) generated dynamically via the Web Audio API OscillatorNode[cite: 1].
 
-> ⚡ No Game Engine • No Images • No Audio Assets • Pure HTML5 Canvas
+Deep Meta-Progression: A persistent coin economy stored in localStorage allows players to upgrade their base Fire Rate, Max HP, Damage, Movement Speed, and Bullet Speed between runs[cite: 1].
 
-</div>
+Dynamic Arsenal: Cycle seamlessly between the standard rapid-fire gun, a 5-pellet spread shotgun, and a high-damage piercing laser[cite: 1].
 
----
+Intense Boss Fights: Every 5th wave spawns a Boss featuring a two-phase attack cycle: an expanding "Radial Hell" bullet-hell burst and a lightning-fast "Charge Dash"[cite: 1].
 
-# 🌌 Overview
+Responsive Controls: Native support for desktop (Keyboard & Mouse) and mobile devices (Virtual Joystick & Dual-Touch aiming)[cite: 1].
 
-**KritikShoot** is a fast-paced **Neon-Noir / Cyberpunk** survival shooter where you pilot a sleek delta-wing fighter through endless waves of glowing geometric enemies.
+🛠️ Under the Hood (Micro-Optimizations)
+KritikShoot is engineered for flawless high-Hz performance using advanced game development patterns:
 
-Fight to survive, level up during each run, unlock powerful upgrades, defeat massive bosses, and earn permanent upgrades that make every future run stronger.
+Temporal Interpolation: Positions are cached and rendered using linear interpolation (lerp), eliminating micro-stutters on 120/144Hz displays[cite: 1].
 
-Everything is built from scratch using **Vanilla JavaScript**, **HTML5 Canvas**, and the **Web Audio API**—without relying on any external game engine or rendering framework.
+Object Pooling & Dead-Flag Compaction: Bullets and particles are recycled from pre-allocated arrays, and dead entities are bulk-compacted once they cross a 35% threshold to eliminate expensive garbage collection spikes[cite: 1].
 
----
+Spatial Hash Grid: Swept-circle collision detection (CCD) is optimized through spatial hashing, allowing massive enemy counts without frame drops[cite: 1].
 
-# ✨ Features
+Finite State Machine (FSM): Clean architectural transitions between MENU, PLAYING, PAUSED, LEVEL_UP, and GAME_OVER states[cite: 1].
 
-## 🎮 Gameplay
+👾 Enemy Bestiary
+Prepare to face a diverse swarm of glowing geometric threats:
 
-- 🌊 Endless wave-based survival
-- 👑 Boss battles every 5th wave
-- ⭐ RPG-style leveling system
-- 🎁 Upgrade selection after every level
-- 🪙 Persistent meta-progression
-- 🏆 Local leaderboard
-- 💾 Automatic save using LocalStorage
+Normal / Fast: Green and yellow flankers that rush your position[cite: 1].
 
----
+Tank: Massive, slow-moving blue hexagons with extremely high HP[cite: 1].
 
-## 🔫 Weapons
+Rusher: Fragile but incredibly fast red chargers[cite: 1].
 
-Switch between multiple weapons during gameplay.
+Ranged: Technological cyan octagons that maintain a specific distance and fire accurate shots[cite: 1].
 
-- 🔴 Rapid Fire Rifle
-- 🟠 5-Pellet Spread Shotgun
-- 🔵 Piercing Laser Cannon
+Exploder: Orange squares that detonate on proximity, causing massive AoE screen-shake damage[cite: 1].
 
-Each weapon offers a completely different combat style.
+Spread: Purple pentagons that fire a deadly 3-way spread[cite: 1].
 
----
+🎮 Controls
+Desktop
+Move: W A S D or Arrow Keys[cite: 1]
 
-## ⚡ Power-ups
+Aim / Fire: Mouse Movement & Left Click[cite: 1]
 
-Collect temporary buffs including
+Cycle Weapon: TAB[cite: 1]
 
-- 🛡 Shield
-- 🚀 Speed Boost
-- 🔥 Rage Mode
-- 🎯 Triple Shot
-- ❤️ Health Pickup
-- ⭐ XP Boost
+Pause: ESC[cite: 1]
 
----
+Mobile
+Move: Left-side Virtual Joystick[cite: 1]
 
-## 👾 Enemy Types
+Aim / Fire: Right-side Touch & Drag, or the on-screen FIRE button[cite: 1]
 
-Every enemy behaves differently.
+🎨 Design System
+The UI utilizes a striking glassmorphism style featuring blur backdrops, neon glows, and custom typography (Orbitron for display text and Rajdhani for HUD elements)[cite: 3]. Player upgrades are tracked via glowing, rounded progress bars directly on the gameplay HUD[cite: 1, 3].
 
-| Enemy | Description |
-|--------|-------------|
-| 🟢 Basic | Standard chaser |
-| 🟡 Fast | Quick melee attacker |
-| 🔵 Tank | High health, slow movement |
-| 🔴 Rusher | Extremely fast charger |
-| 🔷 Ranged | Keeps distance while shooting |
-| 🟣 Spread | Fires a three-way bullet spread |
-| 🟠 Exploder | Self-destructs with massive AoE damage |
-| 👑 Boss | Multi-phase bullet hell encounter |
+🚀 Quick Start (Local Development)
+Because KritikShoot uses zero external image or sound files, running it locally is incredibly simple.
 
----
+Clone the repository:
 
-# 🚀 Boss Battles
-
-Every fifth wave introduces a massive boss featuring multiple attack phases.
-
-### ☢ Radial Hell
-
-- Expanding bullet rings
-- Increasing bullet density
-- Bullet-hell style combat
-
-### ⚡ Charge Dash
-
-- Telegraph warning
-- High-speed dash attack
-- Requires careful positioning to dodge
-
----
-
-# 📈 Progression
-
-## During a Run
-
-Earn XP by defeating enemies.
-
-Leveling up lets you choose upgrades like
-
-- ⚡ Fire Rate
-- ❤️ Max Health
-- 💥 Damage
-- 🚀 Bullet Speed
-- 🏃 Movement Speed
-- 🎯 Critical Chance
-- 🩸 Lifesteal
-
----
-
-## Permanent Progression
-
-Every completed run rewards Coins.
-
-Spend Coins on permanent upgrades including
-
-- Fire Rate
-- Health
-- Damage
-- Speed
-- Bullet Speed
-
-All progress is automatically saved using **LocalStorage**.
-
----
-
-# 🎨 Visuals
-
-KritikShoot features a clean cyberpunk visual style built entirely with Canvas.
-
-Effects include
-
-- ✨ Neon glow rendering
-- 🌠 Bullet trails
-- 💥 Dynamic particle explosions
-- 📳 Camera shake
-- 🔥 Thruster animations
-- 💎 Glassmorphism menus
-- 🌌 Animated HUD
-- ⚡ Smooth interpolation rendering
-
-No sprite sheets or texture files are used.
-
----
-
-# 🔊 Audio
-
-Every sound effect is generated procedurally using the **Web Audio API**.
-
-Includes
-
-- Laser shots
-- Explosions
-- Enemy destruction
-- Player damage
-- Spread weapons
-
-No audio assets are included.
-
----
-
-# ⚙ Performance Optimizations
-
-KritikShoot was engineered for smooth gameplay even with hundreds of entities on screen.
-
-### 🚀 Engine Features
-
-- Object Pooling
-- Spatial Hash Grid
-- Continuous Collision Detection (CCD)
-- Cached Glow Sprite Rendering
-- Dead Object Compaction
-- Temporal Interpolation
-- Optimized Collision Detection
-- Finite State Machine (FSM)
-
-Designed to minimize garbage collection and maintain stable frame rates.
-
----
-
-# 🎮 Controls
-
-## Desktop
-
-| Key | Action |
-|------|--------|
-| **W A S D** | Move |
-| **Arrow Keys** | Move |
-| **Mouse** | Aim |
-| **Left Click** | Shoot |
-| **Q** | Change Weapon |
-| **ESC** | Pause |
-
----
-
-## Mobile
-
-- 🎮 Virtual Joystick
-- 🔥 Fire Button
-- ⏸ Pause Button
-
-Optimized for touch devices.
-
----
-
-# 📸 Gameplay
-
-> Replace these placeholders with screenshots or GIFs.
-
-## Main Menu
-
-```
-assets/menu.png
-```
-
-## Gameplay
-
-```
-assets/gameplay.gif
-```
-
-## Boss Fight
-
-```
-assets/boss.png
-```
-
-## Upgrade Screen
-
-```
-assets/upgrades.png
-```
-
----
-
-# 🛠 Built With
-
-- HTML5
-- CSS3
-- Vanilla JavaScript (ES6)
-- HTML5 Canvas API
-- Web Audio API
-
----
-
-# 🚀 Getting Started
-
-Clone the repository
-
-```bash
 git clone https://github.com/LeagueStar/KritikShoot.git
-```
 
-Navigate into the project
-
-```bash
-cd KritikShoot
-```
-
-Run a local server
-
-Using Node
-
-```bash
+2. Open the directory and serve the files. You can use any local web server (e.g., Python, VS Code Live Server, or Node):
+   ```bash
 npx serve .
-```
-
-or using Python
-
-```bash
+# or
 python -m http.server 8000
-```
-
-Open your browser and visit
-
-```
-http://localhost:8000
-```
-
----
-
-# 📂 Project Structure
-
-```text
-KritikShoot/
-│
-├── assets/
-├── game.js
-├── style.css
-├── index.html
-├── README.md
-└── LICENSE
-```
-
----
-
-# 🎯 Roadmap
-
-- [ ] Additional Bosses
-- [ ] New Weapons
-- [ ] More Enemy Variants
-- [ ] Achievements
-- [ ] Online Leaderboards
-- [ ] Daily Challenges
-- [ ] Multiple Maps
-- [ ] Co-op Multiplayer
-
----
-
-# 🤝 Contributing
-
-Contributions are welcome!
-
-1. Fork the repository.
-2. Create a feature branch.
-
-```bash
-git checkout -b feature/NewFeature
-```
-
-3. Commit your changes.
-
-```bash
-git commit -m "Add NewFeature"
-```
-
-4. Push your branch.
-
-```bash
-git push origin feature/NewFeature
-```
-
-5. Open a Pull Request.
-
----
-
-# ⭐ Support
-
-If you enjoyed this project, consider leaving a ⭐ on the repository.
-
-It helps the project reach more developers and motivates future updates.
-
----
-
-<div align="center">
-
-## Built with ❤️ by **LeagueStar**
-
-**Happy Shooting! 🚀**
-
-</div>
+Open http://localhost:8000 in your browser and Deploy!
