@@ -432,6 +432,113 @@ class AudioEngine {
 
 
 // =============================================================================
+// SECTION 6d — META-PROGRESSION
+// Coin economy + persistent upgrades stored in localStorage.
+// Coins earned = wave * 10 + floor(gameTime / 5) on death.
+// Stat bonuses are applied multiplicatively on top of base CONFIG values
+// via MetaProgression.getBonus(key), which returns a flat additive value.
+// =============================================================================
+class MetaProgression {
+  // Upgrade catalogue: each entry is one purchasable tier.
+  // maxTier: how many times it can be bought.
+  // cost(tier): coins cost for that tier.
+  // label: display name.
+  // bonus(tiers): the flat additive bonus given the number of tiers owned.
+  static UPGRADES = [
+    {
+      id:      "fireRate",
+      label:   "⚡ Fire Rate",
+      desc:    "+5% fire rate per tier",
+      maxTier: 5,
+      cost:    tier => 40 + tier * 20,
+      // Returns seconds to subtract from shoot delay (capped in Player getter)
+      bonus:   tiers => tiers * 0.01,
+    },
+    {
+      id:      "health",
+      label:   "❤ Max HP",
+      desc:    "+10 max HP per tier",
+      maxTier: 8,
+      cost:    tier => 30 + tier * 15,
+      bonus:   tiers => tiers * 10,
+    },
+    {
+      id:      "damage",
+      label:   "💥 Damage",
+      desc:    "+2 damage per tier",
+      maxTier: 6,
+      cost:    tier => 50 + tier * 25,
+      bonus:   tiers => tiers * 2,
+    },
+    {
+      id:      "speed",
+      label:   "🏃 Move Speed",
+      desc:    "+15 speed per tier",
+      maxTier: 5,
+      cost:    tier => 35 + tier * 20,
+      bonus:   tiers => tiers * 15,
+    },
+    {
+      id:      "bulletSpeed",
+      label:   "🚀 Bullet Speed",
+      desc:    "+40 bullet speed per tier",
+      maxTier: 4,
+      cost:    tier => 45 + tier * 20,
+      bonus:   tiers => tiers * 40,
+    },
+  ];
+
+  static load() {
+    try {
+      return JSON.parse(localStorage.getItem("ks_meta") || "{}");
+    } catch { return {}; }
+  }
+
+  static save(data) {
+    localStorage.setItem("ks_meta", JSON.stringify(data));
+  }
+
+  static getCoins() {
+    return parseInt(localStorage.getItem("ks_coins") || "0", 10);
+  }
+
+  static setCoins(n) {
+    localStorage.setItem("ks_coins", String(Math.max(0, n)));
+  }
+
+  static awardCoins(wave, gameTime) {
+    const earned = wave * 10 + Math.floor(gameTime / 5);
+    MetaProgression.setCoins(MetaProgression.getCoins() + earned);
+    return earned;
+  }
+
+  // Returns the flat bonus value for a given upgrade id
+  static getBonus(id) {
+    const data   = MetaProgression.load();
+    const tiers  = data[id] || 0;
+    const entry  = MetaProgression.UPGRADES.find(u => u.id === id);
+    return entry ? entry.bonus(tiers) : 0;
+  }
+
+  // Returns true if purchase succeeded
+  static purchase(id) {
+    const entry = MetaProgression.UPGRADES.find(u => u.id === id);
+    if (!entry) return false;
+    const data  = MetaProgression.load();
+    const tiers = data[id] || 0;
+    if (tiers >= entry.maxTier) return false;
+    const cost  = entry.cost(tiers);
+    const coins = MetaProgression.getCoins();
+    if (coins < cost) return false;
+    MetaProgression.setCoins(coins - cost);
+    data[id] = tiers + 1;
+    MetaProgression.save(data);
+    return true;
+  }
+}
+
+
+// =============================================================================
 // SECTION 7 — BULLET
 // FIX 3 (interpolation): prevX/prevY cached before each move.
 // FIX 4 (dead-flag):     active=false on death; pool release is caller's job.
@@ -561,11 +668,11 @@ class Player {
     this.weapon   = "default";
   }
 
-  get maxHealth()  { return CONFIG.PLAYER_BASE_HEALTH + this.upgrades.health * 20; }
-  get speed()      { return CONFIG.PLAYER_BASE_SPEED  + (this.upgrades.speed * 30) + (this.buffs.speedBoost > 0 ? 150 : 0); }
-  get damage()     { return CONFIG.PLAYER_BASE_DAMAGE + (this.upgrades.damage * 2); }
-  get shootDelay() { return Math.max(0.05, CONFIG.PLAYER_SHOOT_DELAY - (this.upgrades.fireRate * 0.02)); }
-  get bulletSpd()  { return CONFIG.PLAYER_BULLET_SPEED + (this.upgrades.bulletSpeed * 30); }
+  get maxHealth()  { return CONFIG.PLAYER_BASE_HEALTH + this.upgrades.health * 20    + MetaProgression.getBonus("health"); }
+  get speed()      { return CONFIG.PLAYER_BASE_SPEED  + (this.upgrades.speed * 30)   + (this.buffs.speedBoost > 0 ? 150 : 0) + MetaProgression.getBonus("speed"); }
+  get damage()     { return CONFIG.PLAYER_BASE_DAMAGE + (this.upgrades.damage * 2)   + MetaProgression.getBonus("damage"); }
+  get shootDelay() { return Math.max(0.05, CONFIG.PLAYER_SHOOT_DELAY - (this.upgrades.fireRate * 0.02) - MetaProgression.getBonus("fireRate")); }
+  get bulletSpd()  { return CONFIG.PLAYER_BULLET_SPEED + (this.upgrades.bulletSpeed * 30) + MetaProgression.getBonus("bulletSpeed"); }
   get critChance() { return this.upgrades.critChance * 0.05; }
   get lifesteal()  { return this.upgrades.lifesteal  * 0.05; }
 
@@ -1002,6 +1109,257 @@ class Enemy {
 
 
 // =============================================================================
+// SECTION 10b — BOSS
+// Spawns every 5 waves.  Two-phase attack cycle:
+//   Phase A "Radial Hell" — fires N bullets in a ring, then rests.
+//   Phase B "Charge Dash" — telegraphs (flashes) then dashes at the player.
+// Boss also takes 50 % reduced damage so fights last longer.
+// =============================================================================
+class Boss {
+  constructor(game) {
+    this.game   = game;
+    this.x      = game.width  / 2;
+    this.y      = -80;          // enters from top-center
+    this.prevX  = this.x;
+    this.prevY  = this.y;
+    this.size   = 52 * game.uiScale;
+    this.color  = "#ff2d55";
+    this.speed  = 80;
+
+    const wf    = Math.max(1, Math.log(game.wave + 1));
+    this.maxHp  = 800 + game.wave * 120;
+    this.hp     = this.maxHp;
+    this.damage = 20 + Math.floor(wf * 4);
+
+    // Phase machine
+    // "enter"  → moves to arena center, then starts cycle
+    // "radial" → fires radial burst
+    // "rest"   → pause between attacks
+    // "telegraph" → flashes before dash (1.2 s window, player can dodge)
+    // "dash"   → high-speed charge toward the player's last known position
+    this._phase        = "enter";
+    this._phaseTimer   = 0;
+    this._targetX      = game.width  / 2;
+    this._targetY      = game.height / 2;
+    this._dashDx       = 0;
+    this._dashDy       = 0;
+    this._radialCount  = 0;   // increments each radial phase for increasing difficulty
+    this._flashToggle  = false;
+    this._flashTimer   = 0;
+    this._lastShot     = 0;
+    this._shootInterval = 0.18;  // seconds between radial ring shots during burst
+    this._burstShots    = 0;     // shots fired in current radial burst
+    this._burstTarget   = 16;    // ring count per burst
+  }
+
+  get isAlive() { return this.hp > 0; }
+
+  update(dt, player) {
+    this.prevX = this.x;
+    this.prevY = this.y;
+
+    switch (this._phase) {
+
+      // ── ENTER: glide to arena centre ──────────────────────────────────────
+      case "enter": {
+        const dx = this._targetX - this.x;
+        const dy = this._targetY - this.y;
+        const d  = Math.hypot(dx, dy);
+        if (d < 4) {
+          this.x = this._targetX;
+          this.y = this._targetY;
+          this._startRadial();
+        } else {
+          const spd = this.speed * 2;
+          this.x += (dx / d) * spd * dt;
+          this.y += (dy / d) * spd * dt;
+        }
+        break;
+      }
+
+      // ── RADIAL: fire expanding rings of bullets ────────────────────────────
+      case "radial": {
+        this._phaseTimer += dt;
+        const sinceShot = this.game.gameTime - this._lastShot;
+        if (sinceShot >= this._shootInterval && this._burstShots < this._burstTarget) {
+          this._lastShot = this.game.gameTime;
+          this._burstShots++;
+          // Each ring is offset by a small angle so rings interleave
+          const offset = (this._burstShots / this._burstTarget) * Math.PI * 0.5;
+          const rings  = 12 + this._radialCount * 2;
+          for (let i = 0; i < rings; i++) {
+            const ang = (i / rings) * Math.PI * 2 + offset;
+            const spd = 220 + this._radialCount * 18;
+            const b   = this.game.bulletPool.get();
+            b.init(this.x, this.y,
+              Math.cos(ang) * spd, Math.sin(ang) * spd,
+              6 * this.game.uiScale, "#ff2d55", this.damage, true);
+            this.game.bullets.push(b);
+            this.game.trailMgr.register(b, b.color);
+          }
+        }
+        if (this._burstShots >= this._burstTarget) {
+          this._phase      = "rest";
+          this._phaseTimer = 0;
+        }
+        break;
+      }
+
+      // ── REST: short pause then telegraph charge ────────────────────────────
+      case "rest": {
+        this._phaseTimer += dt;
+        if (this._phaseTimer >= 1.4) {
+          this._phase      = "telegraph";
+          this._phaseTimer = 0;
+          this._flashTimer = 0;
+          this._flashToggle = false;
+          // Lock onto player's current position for the upcoming dash
+          this._dashDx = player.x - this.x;
+          this._dashDy = player.y - this.y;
+          const dl = Math.hypot(this._dashDx, this._dashDy) || 1;
+          this._dashDx /= dl;
+          this._dashDy /= dl;
+        }
+        break;
+      }
+
+      // ── TELEGRAPH: flash yellow for 1.2 s before charging ─────────────────
+      case "telegraph": {
+        this._phaseTimer += dt;
+        this._flashTimer  += dt;
+        if (this._flashTimer >= 0.12) {  // toggle every 120 ms
+          this._flashToggle = !this._flashToggle;
+          this._flashTimer  = 0;
+        }
+        if (this._phaseTimer >= 1.2) {
+          this._phase      = "dash";
+          this._phaseTimer = 0;
+          this._flashToggle = false;
+        }
+        break;
+      }
+
+      // ── DASH: fast linear charge in the locked direction ─────────────────
+      case "dash": {
+        this._phaseTimer += dt;
+        const dashSpeed = this.speed * 7.5;
+        const nx = this.x + this._dashDx * dashSpeed * dt;
+        const ny = this.y + this._dashDy * dashSpeed * dt;
+
+        // Check player contact during dash
+        if (player.alive) {
+          const dSq = Utils.distSq(nx, ny, player.x, player.y);
+          if (dSq < (this.size + player.size) ** 2) {
+            if (player.buffs.shield <= 0) {
+              player.health -= this.damage * 3;
+              this.game.triggerDamageFlash(2.0);
+              this.game.audio.playPlayerHit();
+              if (player.health <= 0) { player.alive = false; player.health = 0; }
+            }
+          }
+        }
+
+        this.x = nx;
+        this.y = ny;
+
+        // End dash when it exits arena OR after 0.65 s
+        const oob = nx < -this.size || nx > this.game.width + this.size ||
+                    ny < -this.size || ny > this.game.height + this.size;
+        if (oob || this._phaseTimer >= 0.65) {
+          // Reposition to centre-ish so boss stays in arena
+          if (oob) {
+            this.x = Utils.clamp(this.x, this.size, this.game.width  - this.size);
+            this.y = Utils.clamp(this.y, this.size, this.game.height - this.size);
+          }
+          this._radialCount++;
+          this._startRadial();
+        }
+        break;
+      }
+    }
+  }
+
+  _startRadial() {
+    this._phase        = "radial";
+    this._phaseTimer   = 0;
+    this._burstShots   = 0;
+    this._burstTarget  = 14 + this._radialCount * 2;  // grows each cycle
+    this._lastShot     = this.game.gameTime;
+  }
+
+  draw(ctx, alpha) {
+    const rx = Utils.lerp(this.prevX, this.x, alpha);
+    const ry = Utils.lerp(this.prevY, this.y, alpha);
+    const s  = this.size;
+    const t  = this.game.gameTime;
+
+    // Telegraph flash: override color to gold
+    const drawColor = (this._phase === "telegraph" && this._flashToggle) ? "#f1c40f" : this.color;
+
+    // Outer halo
+    const glow = GlowCache.get(drawColor, s, s * 1.8);
+    ctx.drawImage(glow.canvas, rx - glow.half, ry - glow.half);
+
+    ctx.save();
+    ctx.translate(rx, ry);
+    ctx.rotate(t * 0.6);
+
+    // 8-pointed star body
+    const outer = s;
+    const inner = s * 0.45;
+    const pts   = 8;
+    ctx.beginPath();
+    for (let i = 0; i < pts * 2; i++) {
+      const r   = i % 2 === 0 ? outer : inner;
+      const ang = (i / (pts * 2)) * Math.PI * 2 - Math.PI / 2;
+      i === 0 ? ctx.moveTo(Math.cos(ang) * r, Math.sin(ang) * r)
+              : ctx.lineTo(Math.cos(ang) * r, Math.sin(ang) * r);
+    }
+    ctx.closePath();
+    ctx.fillStyle   = "rgba(5,8,16,0.82)";
+    ctx.fill();
+    ctx.strokeStyle = drawColor;
+    ctx.lineWidth   = 3.5;
+    ctx.shadowColor = drawColor;
+    ctx.shadowBlur  = 22;
+    ctx.stroke();
+
+    // Pulsing core
+    ctx.shadowBlur  = 14;
+    ctx.fillStyle   = drawColor;
+    ctx.globalAlpha = 0.55 + Math.sin(t * 8) * 0.3;
+    ctx.beginPath();
+    ctx.arc(0, 0, s * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    ctx.restore();
+
+    // HP bar (wide, above the boss)
+    const barW = s * 3.5;
+    const barH = 10 * this.game.uiScale;
+    const barX = rx - barW / 2;
+    const barY = ry - s - barH - 14;
+    const hpR  = Utils.clamp(this.hp / this.maxHp, 0, 1);
+    ctx.fillStyle = "rgba(255,45,85,0.35)";
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.fillStyle = "#ff2d55";
+    ctx.fillRect(barX, barY, barW * hpR, barH);
+
+    // "BOSS" label
+    ctx.save();
+    ctx.font      = `900 ${Math.max(14, 18 * this.game.uiScale)}px ${CONFIG.HUD_FONT}`;
+    ctx.fillStyle = "#ff2d55";
+    ctx.textAlign = "center";
+    ctx.shadowColor = "#ff2d55";
+    ctx.shadowBlur  = 10;
+    ctx.fillText("BOSS", rx, barY - 6);
+    ctx.restore();
+  }
+}
+
+
+// =============================================================================
 // SECTION 11 — INPUT MANAGER  (unchanged)
 // =============================================================================
 class InputManager {
@@ -1166,10 +1524,12 @@ class UIManager {
       gameOverActions: document.getElementById("gameOverActions"),
       mobileUI:        document.getElementById("mobileControls"),
       leaderboard:     document.getElementById("localLeaderboard"),
+      coinShop:        document.getElementById("coinShop"),
     };
 
     this._bindUI();
     this._renderLeaderboard();
+    this._renderCoinShop();
   }
 
   _bindUI() {
@@ -1178,6 +1538,7 @@ class UIManager {
       const name = raw.length > 0 ? raw : "Ghost";
       localStorage.setItem("ks_nickname", name);
       this._el.startScreen.classList.add("hidden");
+      this._el.coinShop?.classList.add("hidden");
       if (this.game.input.isMobile || window.innerWidth <= 768) {
         this._el.mobileUI.classList.add("mobile-ui--active");
       }
@@ -1186,6 +1547,8 @@ class UIManager {
 
     document.getElementById("restartBtn").addEventListener("click", () => {
       this._el.gameOverActions.classList.add("hidden");
+      document.getElementById("gameOverCoins")?.classList.add("hidden");
+      this._el.coinShop?.classList.add("hidden");
       if (this.game.input.isMobile || window.innerWidth <= 768) {
         this._el.mobileUI.classList.add("mobile-ui--active");
       }
@@ -1194,8 +1557,10 @@ class UIManager {
 
     document.getElementById("menuBtn").addEventListener("click", () => {
       this._el.gameOverActions.classList.add("hidden");
+      document.getElementById("gameOverCoins")?.classList.add("hidden");
       this._el.mobileUI.classList.remove("mobile-ui--active");
       this._renderLeaderboard();
+      this._renderCoinShop();
       this._el.startScreen.classList.remove("hidden");
       cancelAnimationFrame(this.game._rafId);
       this.game.fsm.transition(GameState.MENU);
@@ -1228,14 +1593,68 @@ class UIManager {
     const qb = document.getElementById("quitBtn");
     if (qb) qb.classList.add("hidden");
     this._renderLeaderboard();
+    this._renderCoinShop();
     this._el.startScreen.classList.remove("hidden");
   }
 
   showGameOver() {
+    const g    = this.game;
     const name = localStorage.getItem("ks_nickname") || "Ghost";
-    this._saveScore(name, this.game.wave, this.game.gameTime, this.game.player.stats.level);
+    this._saveScore(name, g.wave, g.gameTime, g.player.stats.level);
     this._renderLeaderboard();
+
+    // Award coins based on run performance
+    const coinsEarned = MetaProgression.awardCoins(g.wave, g.gameTime);
+    this._lastCoinsEarned = coinsEarned;
+
     this._el.gameOverActions.classList.remove("hidden");
+
+    // Show coin award notice
+    const coinsEl = document.getElementById("gameOverCoins");
+    if (coinsEl) {
+      coinsEl.textContent = `+${coinsEarned} coins earned`;
+      coinsEl.classList.remove("hidden");
+    }
+
+    // ── Remote leaderboard: POST to your Supabase (or any REST) endpoint ─
+    // Replace the URL string below with your actual endpoint.
+    // The score object matches whatever schema you set up.
+    this._postScoreRemote({
+      name,
+      wave:  g.wave,
+      time:  +g.gameTime.toFixed(1),
+      level: g.player.stats.level,
+      kills: g.kills,
+    });
+  }
+
+  /**
+   * Posts a score to a remote REST endpoint.
+   * Swap LEADERBOARD_URL for your Supabase row-insert endpoint, e.g.:
+   *   https://<project>.supabase.co/rest/v1/scores
+   * Add your anon key as the apikey / Authorization header.
+   *
+   * The function is intentionally fire-and-forget: failures are silently logged.
+   */
+  async _postScoreRemote(scoreObj) {
+    const LEADERBOARD_URL = "https://YOUR_PROJECT.supabase.co/rest/v1/scores";
+    const ANON_KEY        = "YOUR_SUPABASE_ANON_KEY";
+
+    try {
+      const res = await fetch(LEADERBOARD_URL, {
+        method:  "POST",
+        headers: {
+          "Content-Type":  "application/json",
+          "apikey":        ANON_KEY,
+          "Authorization": `Bearer ${ANON_KEY}`,
+          "Prefer":        "return=minimal",
+        },
+        body: JSON.stringify(scoreObj),
+      });
+      if (!res.ok) console.warn("[KS] Leaderboard post failed:", res.status);
+    } catch (err) {
+      console.warn("[KS] Leaderboard post error:", err);
+    }
   }
 
   _saveScore(name, wave, time, level) {
@@ -1268,6 +1687,48 @@ class UIManager {
       </table>`;
   }
 
+  _renderCoinShop() {
+    const el = this._el.coinShop;
+    if (!el) return;
+
+    el.classList.remove("hidden");
+    const coins = MetaProgression.getCoins();
+    const data  = MetaProgression.load();
+
+    const rows = MetaProgression.UPGRADES.map(u => {
+      const owned   = data[u.id] || 0;
+      const maxed   = owned >= u.maxTier;
+      const cost    = maxed ? "—" : u.cost(owned);
+      const canAfford = !maxed && coins >= u.cost(owned);
+      return `
+        <div class="shop-row">
+          <div class="shop-info">
+            <span class="shop-label">${u.label}</span>
+            <span class="shop-desc">${u.desc} (${owned}/${u.maxTier})</span>
+          </div>
+          <button
+            class="btn btn--shop ${maxed ? "btn--shop-maxed" : canAfford ? "btn--shop-buy" : "btn--shop-poor"}"
+            data-upgrade="${u.id}"
+            ${maxed ? "disabled" : ""}
+          >${maxed ? "MAX" : `${cost} 🪙`}</button>
+        </div>`;
+    }).join("");
+
+    el.innerHTML = `
+      <div class="shop-header">
+        <span class="shop-title">⚙ UPGRADE DEPOT</span>
+        <span class="shop-coins" id="shopCoinDisplay">🪙 ${coins}</span>
+      </div>
+      ${rows}`;
+
+    el.querySelectorAll("button[data-upgrade]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const success = MetaProgression.purchase(btn.dataset.upgrade);
+        if (success) this._renderCoinShop();
+      });
+    });
+  }
+
   _esc(s) {
     return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
@@ -1284,7 +1745,9 @@ class UIManager {
 
     ctx.font      = `700 ${Math.max(13, 16 * s)}px ${CONFIG.HUD_FONT}`;
     ctx.fillStyle = CONFIG.HUD_COLOR_MAIN;
-    ctx.fillText(`WAVE ${g.wave}   KILLS ${g.kills}/${g.wave}   ENEMIES ${g.enemies.length}`, m, m);
+    const bossLabel = g.boss ? "  ☠ BOSS WAVE" : "";
+    ctx.fillStyle = g.boss ? "#ff2d55" : CONFIG.HUD_COLOR_MAIN;
+    ctx.fillText(`WAVE ${g.wave}${bossLabel}   KILLS ${g.kills}/${g.wave}   ENEMIES ${g.enemies.length}`, m, m);
 
     ctx.font      = `600 ${Math.max(12, 14 * s)}px ${CONFIG.HUD_FONT}`;
     ctx.fillStyle = "rgba(232,240,254,0.7)";
@@ -1478,6 +1941,7 @@ class Game {
     this.walls     = [];
     this.crates    = [];
     this.powerups  = [];
+    this.boss      = null;    // Boss instance, or null when not active
 
     this.wave      = 1;
     this.kills     = 0;
@@ -1641,6 +2105,16 @@ class Game {
               if (!b.piercing) break;  // non-piercing: stop checking after first hit
             }
           }
+
+          // Also check boss as a target for player bullets
+          if (!hit && this.boss) {
+            const t = Utils.sweepCircle(bx0, by0, b.x, b.y, this.boss.x, this.boss.y, b.size + this.boss.size);
+            if (t >= 0) {
+              this.boss.hp -= b.damage * 0.5; // 50 % resistance
+              this.spawnParticles(b.x, b.y, b.color, 4);
+              if (!b.piercing) hit = true;
+            }
+          }
         }
       }
 
@@ -1706,13 +2180,31 @@ class Game {
       this._deadParticles   = 0;
     }
 
+    // ── Boss ──────────────────────────────────────────────────────────────
+    if (this.boss) {
+      this.boss.update(this._FIXED_STEP, this.player);
+      if (!this.boss.isAlive) {
+        this.spawnParticles(this.boss.x, this.boss.y, this.boss.color, 60);
+        this.audio.playEnemyDeath();
+        this.cameraShake = Math.max(this.cameraShake, CONFIG.SHAKE_MAX * 2);
+        // Big coin bonus for killing the boss
+        MetaProgression.awardCoins(this.wave * 3, 0);
+        this.boss = null;
+      }
+    }
+
     // Wave progression
-    if (this.enemies.length === 0 && this.kills >= this.wave) {
+    if (this.enemies.length === 0 && !this.boss && this.kills >= this.wave) {
       this.kills = 0;
       this.wave++;
       this.cameraShake = Math.max(this.cameraShake, CONFIG.SHAKE_MAX);
-      const toSpawn = Math.min(30, 2 + this.wave);
-      for (let k = 0; k < toSpawn; k++) this._spawnEnemy();
+      if (this.wave % 5 === 0) {
+        // Boss wave — skip normal enemies
+        this.boss = new Boss(this);
+      } else {
+        const toSpawn = Math.min(30, 2 + this.wave);
+        for (let k = 0; k < toSpawn; k++) this._spawnEnemy();
+      }
       if (this.wave % 3 === 0) this._spawnWalls();
     }
 
@@ -1844,6 +2336,9 @@ class Game {
 
     // ── Enemies: neon polygon draw (each enemy handles its own glow) ─────
     for (const e of this.enemies) e.draw(ctx, alpha);
+
+    // ── Boss ─────────────────────────────────────────────────────────────
+    if (this.boss) this.boss.draw(ctx, alpha);
 
     // ── Enemy HP bars (interpolated positions) ────────────────────────────
     ctx.fillStyle = CONFIG.WALL_HP_COLOR;
