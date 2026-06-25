@@ -721,3 +721,102 @@ button:active {
     display: none;
   }
 }
+
+
+/* ── Coin Shop ─────────────────────────────────────────────────────────── */
+.coin-shop {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  width: min(340px, 92vw);
+  background: rgba(5, 8, 22, 0.92);
+  border: 1px solid rgba(0, 229, 255, 0.28);
+  border-radius: 12px;
+  padding: 1rem 1.2rem;
+  z-index: 120;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 28px rgba(0, 229, 255, 0.12);
+}
+
+.shop-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(0, 229, 255, 0.18);
+  padding-bottom: 0.5rem;
+}
+
+.shop-title {
+  font-family: 'Orbitron', monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #00e5ff;
+  letter-spacing: 0.06em;
+}
+
+.shop-coins {
+  font-family: 'Rajdhani', monospace;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #feca57;
+}
+
+.shop-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.shop-row:last-child { border-bottom: none; }
+
+.shop-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.shop-label {
+  font-family: 'Rajdhani', monospace;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #e8f0fe;
+}
+
+.shop-desc {
+  font-family: 'Rajdhani', monospace;
+  font-size: 0.72rem;
+  color: rgba(232,240,254,0.45);
+}
+
+.btn--shop {
+  font-family: 'Rajdhani', monospace;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 0.3rem 0.7rem;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+
+.btn--shop-buy  { background: rgba(0,229,255,0.15); color: #00e5ff; border: 1px solid rgba(0,229,255,0.5); }
+.btn--shop-buy:hover { background: rgba(0,229,255,0.28); }
+.btn--shop-poor { background: rgba(255,255,255,0.05); color: rgba(232,240,254,0.3); border: 1px solid rgba(255,255,255,0.1); cursor: not-allowed; }
+.btn--shop-maxed { background: rgba(46,204,113,0.12); color: #2ecc71; border: 1px solid rgba(46,204,113,0.35); cursor: default; }
+
+/* Coin award notice on game over */
+.game-over-coins {
+  font-family: 'Rajdhani', monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #feca57;
+  text-align: center;
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.04em;
+}
