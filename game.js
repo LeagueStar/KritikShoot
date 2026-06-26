@@ -1,13 +1,20 @@
 /**
- * KritikShoot — game.js  (v3 — Micro-Optimized)
+ * KritikShoot — game.js  (v4 — Engine & Input Bug Fixes)
  * ─────────────────────────────────────────────────────────────────────────────
- * NEW in this version:
- *  1. Fighter-jet ship shape  — sharp swept-back triangle, dark stroke edge,
- *                               toned-down glow so the hull is never washed out
+ * v3 fixes retained:
+ *  1. Fighter-jet ship shape  — sharp swept-back triangle, toned-down glow
  *  2. GC fix — hoisted Set    — this.collisionSeenSet reused every tick
  *  3. Temporal interpolation  — prevX/prevY cached; draw() lerps to alpha pos
- *  4. Dead-flag compaction    — bullets/particles use active flag + threshold
- *                               bulk-compact instead of per-removal splice
+ *  4. Dead-flag compaction    — bullets/particles active flag + bulk-compact
+ *
+ * v4 new fixes:
+ *  5. MetaProgression caching — LS snapshot at session start; write-on-purchase
+ *  6. Joystick normalisation  — joystickX/Y are now clean [-1,1] unit vector
+ *  7. Input buffer            — shoot latch survives between fixed-step ticks
+ *  8. Hotkey swap             — weapon cycle moved to E/Shift; Q stays quit
+ *  9. Upgrade caps            — speed capped at 800 px/s; shootDelay floor kept
+ * 10. Auto-aim cache          — nearest-enemy angle computed once in update(),
+ *                               reused by _shoot() and draw()
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -437,6 +444,10 @@ class AudioEngine {
 // Coins earned = wave * 10 + floor(gameTime / 5) on death.
 // Stat bonuses are applied multiplicatively on top of base CONFIG values
 // via MetaProgression.getBonus(key), which returns a flat additive value.
+//
+// FIX 5: Session cache — initSession() snapshots localStorage once at game
+// start. All getBonus() calls during gameplay read from the in-memory cache.
+// localStorage is only written on purchase (write-on-change, not every frame).
 // =============================================================================
 class MetaProgression {
   // Upgrade catalogue: each entry is one purchasable tier.
@@ -488,22 +499,41 @@ class MetaProgression {
     },
   ];
 
-  static load() {
+  // ── Session cache (populated once per run by initSession()) ───────────────
+  static _cache = null;   // plain object mirror of ks_meta
+  static _coins = 0;      // integer mirror of ks_coins
+
+  /**
+   * Call once at the start of every run (Game.start).
+   * Reads localStorage into memory so Player getters never touch LS again.
+   */
+  static initSession() {
     try {
-      return JSON.parse(localStorage.getItem("ks_meta") || "{}");
-    } catch { return {}; }
+      MetaProgression._cache = JSON.parse(localStorage.getItem("ks_meta") || "{}");
+    } catch {
+      MetaProgression._cache = {};
+    }
+    MetaProgression._coins = parseInt(localStorage.getItem("ks_coins") || "0", 10);
   }
 
+  /** Returns the in-memory cache object (never null after initSession). */
+  static load() {
+    return MetaProgression._cache ?? {};
+  }
+
+  /** Writes data to both the in-memory cache and localStorage. */
   static save(data) {
+    MetaProgression._cache = data;
     localStorage.setItem("ks_meta", JSON.stringify(data));
   }
 
   static getCoins() {
-    return parseInt(localStorage.getItem("ks_coins") || "0", 10);
+    return MetaProgression._coins;
   }
 
   static setCoins(n) {
-    localStorage.setItem("ks_coins", String(Math.max(0, n)));
+    MetaProgression._coins = Math.max(0, n);
+    localStorage.setItem("ks_coins", String(MetaProgression._coins));
   }
 
   static awardCoins(wave, gameTime) {
@@ -512,19 +542,19 @@ class MetaProgression {
     return earned;
   }
 
-  // Returns the flat bonus value for a given upgrade id
+  // Returns the flat bonus value for a given upgrade id — reads from cache only
   static getBonus(id) {
-    const data   = MetaProgression.load();
-    const tiers  = data[id] || 0;
+    const cache  = MetaProgression._cache ?? {};
+    const tiers  = cache[id] || 0;
     const entry  = MetaProgression.UPGRADES.find(u => u.id === id);
     return entry ? entry.bonus(tiers) : 0;
   }
 
-  // Returns true if purchase succeeded
+  // Returns true if purchase succeeded; writes cache + localStorage once.
   static purchase(id) {
     const entry = MetaProgression.UPGRADES.find(u => u.id === id);
     if (!entry) return false;
-    const data  = MetaProgression.load();
+    const data  = { ...MetaProgression.load() };   // shallow clone of cache
     const tiers = data[id] || 0;
     if (tiers >= entry.maxTier) return false;
     const cost  = entry.cost(tiers);
@@ -532,7 +562,7 @@ class MetaProgression {
     if (coins < cost) return false;
     MetaProgression.setCoins(coins - cost);
     data[id] = tiers + 1;
-    MetaProgression.save(data);
+    MetaProgression.save(data);   // updates cache + LS in one shot
     return true;
   }
 }
@@ -641,6 +671,10 @@ class Particle {
 // SECTION 9 — PLAYER
 // FIX 1 (visual):        sharp fighter-jet triangle, toned glow, dark stroke
 // FIX 3 (interpolation): prevX/prevY cached; draw() lerps render position
+// FIX 6 (joystick):      joystickX/Y are pre-normalised [-1,1]; no /40 needed
+// FIX 7 (input buffer):  _shootBuffer latch survives fixed-step tick gaps
+// FIX 9 (caps):          speed capped at 800 px/s
+// FIX 10 (auto-aim):     _cachedAimAngle computed once in update(), reused everywhere
 // =============================================================================
 class Player {
   constructor(game) {
@@ -664,17 +698,35 @@ class Player {
     this._lastShot = 0;
 
     // Weapon: "default" | "spread" | "laser"
-    // Cycle with Q key; powerup "weapon_spread" / "weapon_laser" also sets it.
+    // Cycle with E or Shift; powerup "weapon_spread" / "weapon_laser" also sets it.
     this.weapon   = "default";
+
+    // FIX 10: cached aim angle — computed once per tick in update()
+    this._cachedAimAngle = 0;
   }
 
   get maxHealth()  { return CONFIG.PLAYER_BASE_HEALTH + this.upgrades.health * 20    + MetaProgression.getBonus("health"); }
-  get speed()      { return CONFIG.PLAYER_BASE_SPEED  + (this.upgrades.speed * 30)   + (this.buffs.speedBoost > 0 ? 150 : 0) + MetaProgression.getBonus("speed"); }
+  // FIX 9: speed capped at 800 px/s so maxed meta + in-session upgrades can't break physics
+  get speed()      { return Math.min(800, CONFIG.PLAYER_BASE_SPEED + (this.upgrades.speed * 30) + (this.buffs.speedBoost > 0 ? 150 : 0) + MetaProgression.getBonus("speed")); }
   get damage()     { return CONFIG.PLAYER_BASE_DAMAGE + (this.upgrades.damage * 2)   + MetaProgression.getBonus("damage"); }
+  // FIX 9: shootDelay floor already present — Math.max(0.05) prevents fire-rate breaking the loop
   get shootDelay() { return Math.max(0.05, CONFIG.PLAYER_SHOOT_DELAY - (this.upgrades.fireRate * 0.02) - MetaProgression.getBonus("fireRate")); }
   get bulletSpd()  { return CONFIG.PLAYER_BULLET_SPEED + (this.upgrades.bulletSpeed * 30) + MetaProgression.getBonus("bulletSpeed"); }
   get critChance() { return this.upgrades.critChance * 0.05; }
   get lifesteal()  { return this.upgrades.lifesteal  * 0.05; }
+
+  // FIX 10: compute aim angle once per tick; shared by update() gate and _shoot() and draw()
+  _computeAimAngle(input) {
+    if (input.isMobile && this.game.enemies.length > 0) {
+      let nearestDSq = Infinity, nearest = this.game.enemies[0];
+      for (const e of this.game.enemies) {
+        const dSq = Utils.distSq(this.x, this.y, e.x, e.y);
+        if (dSq < nearestDSq) { nearestDSq = dSq; nearest = e; }
+      }
+      return Math.atan2(nearest.y - this.y, nearest.x - this.x);
+    }
+    return Math.atan2(input.mouseY - this.y, input.mouseX - this.x);
+  }
 
   // FIX 3: cache previous position before integrating
   update(dt, input) {
@@ -683,14 +735,18 @@ class Player {
     this.prevX = this.x;
     this.prevY = this.y;
 
+    // FIX 10: compute aim angle once here for both shooting and draw()
+    this._cachedAimAngle = this._computeAimAngle(input);
+
     for (const key in this.buffs) {
       if (this.buffs[key] > 0) this.buffs[key] = Math.max(0, this.buffs[key] - dt);
     }
 
     let dx = 0, dy = 0;
     if (input.joystickActive) {
-      dx = input.joystickX / 40;
-      dy = input.joystickY / 40;
+      // FIX 6: joystickX/Y are already a normalised [-1,1] vector — no /40 needed
+      dx = input.joystickX;
+      dy = input.joystickY;
     } else {
       if (input.keys["w"] || input.keys["arrowup"])    dy -= 1;
       if (input.keys["s"] || input.keys["arrowdown"])  dy += 1;
@@ -709,7 +765,10 @@ class Player {
     this.x = Utils.clamp(this.x, this.size, this.game.width  - this.size);
     this.y = Utils.clamp(this.y, this.size, this.game.height - this.size);
 
-    if (input.isShooting && (this.game.gameTime - this._lastShot) >= this.shootDelay) {
+    // FIX 7: consume the shoot latch so clicks between ticks are never dropped
+    const wantsShoot = input.isShooting || input._shootBuffer;
+    if (wantsShoot && (this.game.gameTime - this._lastShot) >= this.shootDelay) {
+      input._shootBuffer = false;   // latch consumed
       this._shoot(input);
     }
   }
@@ -718,17 +777,8 @@ class Player {
     this._lastShot = this.game.gameTime;
     const audio    = this.game.audio;
 
-    let angle;
-    if (input.isMobile && this.game.enemies.length > 0) {
-      let nearestDSq = Infinity, nearest = this.game.enemies[0];
-      for (const e of this.game.enemies) {
-        const dSq = Utils.distSq(this.x, this.y, e.x, e.y);
-        if (dSq < nearestDSq) { nearestDSq = dSq; nearest = e; }
-      }
-      angle = Math.atan2(nearest.y - this.y, nearest.x - this.x);
-    } else {
-      angle = Math.atan2(input.mouseY - this.y, input.mouseX - this.x);
-    }
+    // FIX 10: reuse the angle cached in update() — no redundant O(n) enemy scan
+    const angle = this._cachedAimAngle;
 
     // ── Weapon dispatch ────────────────────────────────────────────────────
     if (this.weapon === "spread") {
@@ -803,12 +853,8 @@ class Player {
 
   /**
    * FIX 1: Sharp fighter-jet ship.
-   * - Glow pad reduced to 0.6× radius (was 1.8×) so it halos, not floods
-   * - globalAlpha 0.45 on glow layer keeps it atmospheric without washing out
-   * - New path: long needle nose, swept-back delta wings, deep engine notch
-   * - Dark stroke gives hard separation from the neon background
-   *
    * FIX 3: Render position is lerped between prevX/prevY and x/y via alpha.
+   * FIX 10: Uses _cachedAimAngle instead of re-scanning enemies.
    */
   draw(ctx, input, alpha) {
     if (!this.alive) return;
@@ -817,17 +863,8 @@ class Player {
     const rx = Utils.lerp(this.prevX, this.x, alpha);
     const ry = Utils.lerp(this.prevY, this.y, alpha);
 
-    let angle;
-    if (input.isMobile && this.game.enemies.length > 0) {
-      let nearestDSq = Infinity, nearest = this.game.enemies[0];
-      for (const e of this.game.enemies) {
-        const dSq = Utils.distSq(this.x, this.y, e.x, e.y);
-        if (dSq < nearestDSq) { nearestDSq = dSq; nearest = e; }
-      }
-      angle = Math.atan2(nearest.y - ry, nearest.x - rx);
-    } else {
-      angle = Math.atan2(input.mouseY - ry, input.mouseX - rx);
-    }
+    // FIX 10: reuse the tick-cached angle — no duplicate O(n) enemy scan
+    const angle = this._cachedAimAngle;
 
     ctx.save();
     ctx.translate(rx, ry);
@@ -850,7 +887,6 @@ class Player {
     }
 
     // FIX 1: Reduced-intensity glow — pad is 0.6× instead of 1.8×
-    // so the gradient halos the hull edge rather than flooding the whole body.
     const glow = GlowCache.get(this.color, s, s * 0.6);
     ctx.globalAlpha = 0.45;
     ctx.drawImage(glow.canvas, -glow.half, -glow.half);
@@ -864,7 +900,6 @@ class Player {
     flameGrad.addColorStop(1, "rgba(255,60,0,0)");
     ctx.fillStyle = flameGrad;
     ctx.beginPath();
-    // Flame widens slightly at the engine notch then tapers to a point
     ctx.moveTo(-s * 0.22,  s * 0.18);
     ctx.lineTo(-s * 1.1 * flicker, 0);
     ctx.lineTo(-s * 0.22, -s * 0.18);
@@ -872,31 +907,26 @@ class Player {
     ctx.fill();
 
     // FIX 1: Fighter-jet hull path
-    //   - Extended needle nose:  tip at  +1.1s
-    //   - Swept delta wings:     tips at (-0.35s, ±0.85s)
-    //   - Deep engine notch:     indent at (-0.22s, 0) between the wing roots
-    //   - Wing roots meet hull:  (-0.5s, ±0.22s) → engine notch → mirror
     ctx.beginPath();
-    ctx.moveTo( s * 1.1,   0);              // nose tip
-    ctx.lineTo( s * 0.1,   s * 0.18);      // right leading-edge shoulder
-    ctx.lineTo(-s * 0.35,  s * 0.85);      // right wingtip
-    ctx.lineTo(-s * 0.5,   s * 0.22);      // right wing root
-    ctx.lineTo(-s * 0.22,  0);             // engine notch (centre indent)
-    ctx.lineTo(-s * 0.5,  -s * 0.22);      // left wing root
-    ctx.lineTo(-s * 0.35, -s * 0.85);      // left wingtip
-    ctx.lineTo( s * 0.1,  -s * 0.18);      // left leading-edge shoulder
+    ctx.moveTo( s * 1.1,   0);
+    ctx.lineTo( s * 0.1,   s * 0.18);
+    ctx.lineTo(-s * 0.35,  s * 0.85);
+    ctx.lineTo(-s * 0.5,   s * 0.22);
+    ctx.lineTo(-s * 0.22,  0);
+    ctx.lineTo(-s * 0.5,  -s * 0.22);
+    ctx.lineTo(-s * 0.35, -s * 0.85);
+    ctx.lineTo( s * 0.1,  -s * 0.18);
     ctx.closePath();
 
-    // Solid white fill
     ctx.fillStyle = this.color;
     ctx.fill();
 
-    // FIX 1: Dark hard-edge stroke — makes the hull pop against glows
+    // FIX 1: Dark hard-edge stroke
     ctx.strokeStyle = "rgba(5,8,16,0.8)";
     ctx.lineWidth   = 1.5;
     ctx.stroke();
 
-    // Cockpit highlight — small tinted ellipse near the nose
+    // Cockpit highlight
     ctx.fillStyle = "rgba(0,229,255,0.55)";
     ctx.beginPath();
     ctx.ellipse(s * 0.45, 0, s * 0.18, s * 0.09, 0, 0, Math.PI * 2);
@@ -1360,7 +1390,13 @@ class Boss {
 
 
 // =============================================================================
-// SECTION 11 — INPUT MANAGER  (unchanged)
+// SECTION 11 — INPUT MANAGER
+// FIX 6 (joystick):   _updateJoystick now stores a normalised [-1,1] unit vector
+//                      instead of raw pixels, so movement is decoupled from CSS size
+// FIX 7 (buffer):     _shootBuffer latch set on mousedown / touchstart so clicks
+//                      between fixed-step ticks are never silently dropped
+// FIX 8 (hotkey):     weapon cycle moved to E / Shift — Tab hijacks focus,
+//                      Q is reserved for quit-in-pause
 // =============================================================================
 class InputManager {
   constructor() {
@@ -1368,9 +1404,10 @@ class InputManager {
     this.mouseX         = 0;
     this.mouseY         = 0;
     this.isShooting     = false;
+    this._shootBuffer   = false;   // FIX 7: latch for sub-tick clicks
     this.joystickActive = false;
-    this.joystickX      = 0;
-    this.joystickY      = 0;
+    this.joystickX      = 0;       // FIX 6: normalised [-1,1]
+    this.joystickY      = 0;       // FIX 6: normalised [-1,1]
     this.isMobile       = /Mobi|Android/i.test(navigator.userAgent) || window.innerWidth <= 768;
     this._pausePressed  = false;
     this._quitPressed   = false;
@@ -1391,27 +1428,30 @@ class InputManager {
     this.mouseX = e.clientX - rect.left;
     this.mouseY = e.clientY - rect.top;
   });
-  window.addEventListener("mousedown", () => { this.isShooting = true; });
+  window.addEventListener("mousedown", () => {
+    this.isShooting  = true;
+    this._shootBuffer = true;   // FIX 7: latch so the next eligible tick fires
+  });
   window.addEventListener("mouseup",   () => { this.isShooting = false; });
 
   // ── Touch IDs — track left (joystick) vs right (aim) independently ────────
   let jBaseX = 0, jBaseY = 0;
-  let _joyTouchId  = null;  // touch id owning the joystick
-  let _aimTouchId  = null;  // touch id owning the aim zone
+  let _joyTouchId  = null;
+  let _aimTouchId  = null;
 
   const _isRightSide = touch =>
-    touch.clientX > window.innerWidth * 0.45;   // right 55 % = aim zone
+    touch.clientX > window.innerWidth * 0.45;
 
   canvas.addEventListener("touchstart", e => {
     e.preventDefault();
     const rect = canvas.getBoundingClientRect();
     for (const t of e.changedTouches) {
       if (_isRightSide(t) && _aimTouchId === null) {
-        // Right side: aim + fire
         _aimTouchId      = t.identifier;
         this.mouseX      = t.clientX - rect.left;
         this.mouseY      = t.clientY - rect.top;
         this.isShooting  = true;
+        this._shootBuffer = true;   // FIX 7: latch on touch too
       }
     }
   }, { passive: false });
@@ -1466,7 +1506,6 @@ class InputManager {
         this.joystickActive = false;
         this.joystickX      = 0;
         this.joystickY      = 0;
-        // Auto-fire stops when joystick lifts (if aim touch isn't held)
         if (_aimTouchId === null) this.isShooting = false;
         knob.style.transform = "translate(-50%, -50%)";
         joy.classList.remove("joystick--active");
@@ -1478,11 +1517,19 @@ class InputManager {
   const _origUpdateJoy = this._updateJoystick.bind(this);
   this._updateJoystick = (touch, bx, by, k) => {
     _origUpdateJoy(touch, bx, by, k);
-    const moving = Math.hypot(this.joystickX, this.joystickY) > 8;
-    if (moving) this.isShooting = true;
+    // joystickX/Y are now [-1,1]; threshold 0.2 avoids firing in dead-zone
+    const moving = Math.hypot(this.joystickX, this.joystickY) > 0.2;
+    if (moving) {
+      this.isShooting  = true;
+      this._shootBuffer = true;   // FIX 7
+    }
   };
 
-  shootBtn.addEventListener("touchstart", e => { e.preventDefault(); this.isShooting = true; });
+  shootBtn.addEventListener("touchstart", e => {
+    e.preventDefault();
+    this.isShooting  = true;
+    this._shootBuffer = true;   // FIX 7
+  });
   shootBtn.addEventListener("touchend",   e => { e.preventDefault(); this.isShooting = false; });
 
   const pauseBtn = document.getElementById("pauseBtn");
@@ -1498,14 +1545,20 @@ class InputManager {
   }
 }
 
+  // FIX 6: store a normalised [-1,1] unit vector scaled by deflection ratio.
+  // Player.update() multiplies directly by this.speed — no /40 coupling to CSS.
   _updateJoystick(touch, baseX, baseY, knob) {
     const maxRadius = 40;
     let dx = touch.clientX - baseX;
     let dy = touch.clientY - baseY;
     const dist = Math.hypot(dx, dy);
     if (dist > maxRadius) { dx = (dx / dist) * maxRadius; dy = (dy / dist) * maxRadius; }
-    this.joystickX = dx;
-    this.joystickY = dy;
+
+    // Normalised deflection: magnitude 0 (centre) → 1 (rim), direction preserved
+    const norm     = dist > 0 ? Math.min(dist, maxRadius) / maxRadius : 0;
+    this.joystickX = (dist > 0 ? dx / dist : 0) * norm;
+    this.joystickY = (dist > 0 ? dy / dist : 0) * norm;
+
     knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
   }
 }
@@ -1782,7 +1835,7 @@ class UIManager {
     const weaponColor = p.weapon === "laser" ? "#00e5ff" : p.weapon === "spread" ? "#ff9f43" : "#e8f0fe";
     ctx.font      = `700 ${Math.max(11, 13 * s)}px ${CONFIG.HUD_FONT}`;
     ctx.fillStyle = weaponColor;
-    ctx.fillText(`⚔ ${weaponLabel}  [TAB]`, m, xbY + xbH + 4 + 22 * s);
+    ctx.fillText(`⚔ ${weaponLabel}  [E/SHIFT]`, m, xbY + xbH + 4 + 22 * s);
 
     let buffY = xbY + xbH + 28 * s;
     for (const key in p.buffs) {
@@ -1808,7 +1861,7 @@ class UIManager {
       ctx.fillText("ESC or ⏸ to resume", g.width / 2, g.height / 2 + 8 * s);
       ctx.font      = `600 ${Math.max(11, 14 * s)}px ${CONFIG.HUD_FONT}`;
       ctx.fillStyle = "rgba(232,240,254,0.35)";
-      ctx.fillText("Q — Quit to Main Menu", g.width / 2, g.height / 2 + 34 * s);
+      ctx.fillText("Q — Quit to Main Menu  |  E / Shift — cycle weapon", g.width / 2, g.height / 2 + 34 * s);
       ctx.textAlign = "left";
     }
 
@@ -1958,6 +2011,7 @@ class Game {
     this._deadParticles = 0;
 
     this.fsm.transition(GameState.PLAYING);
+    MetaProgression.initSession();   // FIX 5: snapshot LS once per run
     this._spawnWalls();
     for (let i = 0; i < 2; i++) this._spawnEnemy();
 
@@ -2007,9 +2061,10 @@ class Game {
       this.ui.quitToMenu();
     }
 
-    // Weapon cycle: Tab key (not Q, which is reserved for quit-in-pause)
-    if (this.input.keys["tab"] && state === GameState.PLAYING) {
-      this.input.keys["tab"] = false;
+    // FIX 8: weapon cycle on E or Shift — Tab hijacks browser focus, Q is quit
+    if ((this.input.keys["e"] || this.input.keys["shift"]) && state === GameState.PLAYING) {
+      this.input.keys["e"]     = false;
+      this.input.keys["shift"] = false;
       const modes = ["default", "spread", "laser"];
       const idx   = modes.indexOf(this.player.weapon);
       this.player.weapon = modes[(idx + 1) % modes.length];
