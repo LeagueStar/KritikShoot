@@ -140,9 +140,6 @@ The `InputManager` supports simultaneous, sub-tick buffered inputs across all de
 * **Local Leaderboard:** Saves top 10 unique scores directly to `localStorage`, ranked by Wave then Time.
 
 ---
-<div align="center">
-<i>Built under the MIT License by LeagueStar.</i>
-</div>
 
 <div align="center">
 
