@@ -820,3 +820,106 @@ button:active {
   margin-bottom: 0.5rem;
   letter-spacing: 0.04em;
 }
+
+
+/* ─────────────────────────────────────────────────────────────
+   C5. MUTE BUTTON — top-right inside start screen panel
+   ───────────────────────────────────────────────────────────── */
+.btn--mute {
+  position: absolute;
+  top: calc(18px * var(--ui-scale));
+  right: calc(18px * var(--ui-scale));
+  width: calc(40px * var(--ui-scale));
+  height: calc(40px * var(--ui-scale));
+  border-radius: 50%;
+  background: rgba(0, 229, 255, 0.08);
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  color: var(--col-primary);
+  font-size: calc(1.1rem * var(--ui-scale));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(6px);
+  box-shadow: var(--glow-primary);
+  transition: background var(--dur-fast);
+  pointer-events: auto;
+  z-index: 110;
+}
+
+.btn--mute:hover {
+  background: rgba(0, 229, 255, 0.22);
+}
+
+
+/* ─────────────────────────────────────────────────────────────
+   C3. WEAPON SWITCH BUTTON — bottom-center mobile UI
+   ───────────────────────────────────────────────────────────── */
+.btn--weapon {
+  position: absolute;
+  bottom: calc(170px * var(--ui-scale));
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(68px * var(--ui-scale));
+  height: calc(34px * var(--ui-scale));
+  border-radius: var(--radius-sm);
+  background: rgba(0, 229, 255, 0.08);
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  color: var(--col-primary);
+  font-family: var(--font-display);
+  font-size: 0.65rem;
+  letter-spacing: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(6px);
+  box-shadow: var(--glow-primary);
+  pointer-events: auto;
+  transition: background var(--dur-fast);
+}
+
+.btn--weapon:active {
+  background: rgba(0, 229, 255, 0.28);
+}
+
+
+/* ─────────────────────────────────────────────────────────────
+   C4. RUN SUMMARY — injected into #gameOverActions on game over
+   ───────────────────────────────────────────────────────────── */
+.run-summary {
+  width: min(320px, 90vw);
+  background: rgba(5, 8, 22, 0.88);
+  border: 1px solid rgba(0, 229, 255, 0.28);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.1);
+  margin-bottom: 0.75rem;
+}
+
+.run-summary__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-family: 'Rajdhani', sans-serif;
+}
+
+.run-summary__row:last-child {
+  border-bottom: none;
+}
+
+.run-summary__label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: rgba(232, 240, 254, 0.5);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.run-summary__value {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #00e5ff;
+  letter-spacing: 1px;
+}
