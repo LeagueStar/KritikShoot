@@ -1590,7 +1590,7 @@ class InputManager {
   _bindListeners() {
     const canvas   = document.getElementById("gameCanvas");
     const joy      = document.getElementById("joystick");
-    const knob     = joy.querySelector(".joystick__knob");
+    const knob     = joy ? joy.querySelector(".joystick__knob") : null;
     const shootBtn = document.getElementById("shootBtn");
 
     window.addEventListener("keydown", e => { this.keys[e.key.toLowerCase()] = true; });
@@ -1650,18 +1650,20 @@ class InputManager {
     });
 
     // ── Joystick (left zone) ──────────────────────────────────────────────────
-    joy.addEventListener("touchstart", e => {
-      e.preventDefault();
-      if (_joyTouchId !== null) return;
-      const t = e.changedTouches[0];
-      _joyTouchId         = t.identifier;
-      this.joystickActive = true;
-      joy.classList.add("joystick--active");
-      const r = joy.getBoundingClientRect();
-      jBaseX  = r.left + r.width  / 2;
-      jBaseY  = r.top  + r.height / 2;
-      this._updateJoystick(t, jBaseX, jBaseY, knob);
-    }, { passive: false });
+    if (joy) {
+      joy.addEventListener("touchstart", e => {
+        e.preventDefault();
+        if (_joyTouchId !== null) return;
+        const t = e.changedTouches[0];
+        _joyTouchId         = t.identifier;
+        this.joystickActive = true;
+        joy.classList.add("joystick--active");
+        const r = joy.getBoundingClientRect();
+        jBaseX  = r.left + r.width  / 2;
+        jBaseY  = r.top  + r.height / 2;
+        this._updateJoystick(t, jBaseX, jBaseY, knob);
+      }, { passive: false });
+    }
 
     document.addEventListener("touchmove", e => {
       if (!this.joystickActive) return;
@@ -1680,8 +1682,8 @@ class InputManager {
           this.joystickX      = 0;
           this.joystickY      = 0;
           if (_aimTouchId === null) this.isShooting = false;
-          knob.style.transform = "translate(-50%, -50%)";
-          joy.classList.remove("joystick--active");
+          if (knob) knob.style.transform = "translate(-50%, -50%)";
+          if (joy) joy.classList.remove("joystick--active");
         }
       }
     });
@@ -1699,12 +1701,14 @@ class InputManager {
       }
     };
 
-    shootBtn.addEventListener("touchstart", e => {
-      e.preventDefault();
-      this.isShooting  = true;
-      this._shootBuffer = true;   // FIX 7
-    });
-    shootBtn.addEventListener("touchend",   e => { e.preventDefault(); this.isShooting = false; });
+    if (shootBtn) {
+      shootBtn.addEventListener("touchstart", e => {
+        e.preventDefault();
+        this.isShooting  = true;
+        this._shootBuffer = true;   // FIX 7
+      });
+      shootBtn.addEventListener("touchend",   e => { e.preventDefault(); this.isShooting = false; });
+    }
 
     const pauseBtn = document.getElementById("pauseBtn");
     if (pauseBtn) {
@@ -1788,38 +1792,48 @@ class UIManager {
       });
     }
 
-    document.getElementById("startBtn").addEventListener("click", () => {
-      const raw  = document.getElementById("nicknameInput").value.trim();
-      const name = raw.length > 0 ? raw : "Ghost";
-      localStorage.setItem("ks_nickname", name);
-      this._el.startScreen.classList.add("hidden");
-      this._el.coinShop?.classList.add("hidden");
-      if (this.game.input.isMobile || window.innerWidth <= 768) {
-        this._el.mobileUI.classList.add("mobile-ui--active");
-      }
-      this.game.start();
-    });
+    const startBtn = document.getElementById("startBtn");
+    if (startBtn) {
+      startBtn.addEventListener("click", () => {
+        const nicknameInput = document.getElementById("nicknameInput");
+        const raw  = nicknameInput ? nicknameInput.value.trim() : "";
+        const name = raw.length > 0 ? raw : "Ghost";
+        localStorage.setItem("ks_nickname", name);
+        this._el.startScreen.classList.add("hidden");
+        this._el.coinShop?.classList.add("hidden");
+        if (this.game.input.isMobile || window.innerWidth <= 768) {
+          this._el.mobileUI.classList.add("mobile-ui--active");
+        }
+        this.game.start();
+      });
+    }
 
-    document.getElementById("restartBtn").addEventListener("click", () => {
-      this._el.gameOverActions.classList.add("hidden");
-      document.getElementById("gameOverCoins")?.classList.add("hidden");
-      this._el.coinShop?.classList.add("hidden");
-      if (this.game.input.isMobile || window.innerWidth <= 768) {
-        this._el.mobileUI.classList.add("mobile-ui--active");
-      }
-      this.game.start();
-    });
+    const restartBtn = document.getElementById("restartBtn");
+    if (restartBtn) {
+      restartBtn.addEventListener("click", () => {
+        this._el.gameOverActions.classList.add("hidden");
+        document.getElementById("gameOverCoins")?.classList.add("hidden");
+        this._el.coinShop?.classList.add("hidden");
+        if (this.game.input.isMobile || window.innerWidth <= 768) {
+          this._el.mobileUI.classList.add("mobile-ui--active");
+        }
+        this.game.start();
+      });
+    }
 
-    document.getElementById("menuBtn").addEventListener("click", () => {
-      this._el.gameOverActions.classList.add("hidden");
-      document.getElementById("gameOverCoins")?.classList.add("hidden");
-      this._el.mobileUI.classList.remove("mobile-ui--active");
-      this._renderLeaderboard();
-      this._renderCoinShop();
-      this._el.startScreen.classList.remove("hidden");
-      cancelAnimationFrame(this.game._rafId);
-      this.game.fsm.transition(GameState.MENU);
-    });
+    const menuBtn = document.getElementById("menuBtn");
+    if (menuBtn) {
+      menuBtn.addEventListener("click", () => {
+        this._el.gameOverActions.classList.add("hidden");
+        document.getElementById("gameOverCoins")?.classList.add("hidden");
+        this._el.mobileUI.classList.remove("mobile-ui--active");
+        this._renderLeaderboard();
+        this._renderCoinShop();
+        this._el.startScreen.classList.remove("hidden");
+        cancelAnimationFrame(this.game._rafId);
+        this.game.fsm.transition(GameState.MENU);
+      });
+    }
 
     document.querySelectorAll(".btn--upgrade").forEach(btn => {
       btn.addEventListener("click", e => {
@@ -2221,8 +2235,8 @@ class Game {
     this.ctx    = this.canvas.getContext("2d");
 
     this.input = new InputManager(this);   // A8: pass game so joystick auto-fire can check FSM state
+    this.audio = new AudioEngine();        // FIX: must be created BEFORE UIManager so _bindUI() can safely read this.game.audio
     this.ui    = new UIManager(this);
-    this.audio = new AudioEngine();
 
     this.bulletPool   = new ObjectPool(Bullet,   CONFIG.POOL_BULLETS);
     this.particlePool = new ObjectPool(Particle, CONFIG.POOL_PARTICLES);
