@@ -548,7 +548,7 @@ button:active {
 }
 
 .mobile-ui--active {
-  display: block !important;
+  display: block;
 }
 
 /* Joystick base */
@@ -671,10 +671,6 @@ button:active {
    12. RESPONSIVE BREAKPOINTS
    ───────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
-  .mobile-ui {
-    display: block;
-  }
-
   .logo-title {
     font-size: calc(2.8rem * var(--ui-scale));
   }
@@ -700,6 +696,46 @@ button:active {
 
   .btn--primary {
     padding: 14px 36px;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  :root {
+    --ui-scale: 0.75;
+  }
+
+  .joystick {
+    width: 90px;
+    height: 90px;
+    bottom: 16px;
+    left: 16px;
+  }
+
+  .btn--shoot {
+    width: 70px;
+    height: 70px;
+    bottom: 16px;
+    right: 16px;
+  }
+
+  .btn--weapon {
+    bottom: 16px;
+    right: calc(70px + 24px + 16px);
+    left: auto;
+    transform: none;
+  }
+
+  .btn--pause {
+    top: 10px;
+    right: 10px;
+    width: 44px;
+    height: 44px;
+  }
+
+  .coin-shop,
+  .screen__inner {
+    overflow-y: auto;
+    max-height: 100vh;
   }
 }
 
@@ -751,7 +787,7 @@ button:active {
   font-family: 'Orbitron', monospace;
   font-size: 0.75rem;
   font-weight: 700;
-  color: #00e5ff;
+  color: var(--col-primary);
   letter-spacing: 0.06em;
 }
 
@@ -784,7 +820,7 @@ button:active {
   font-family: 'Rajdhani', monospace;
   font-size: 0.9rem;
   font-weight: 700;
-  color: #e8f0fe;
+  color: var(--col-text);
 }
 
 .shop-desc {
@@ -805,10 +841,10 @@ button:active {
   transition: opacity 0.15s;
 }
 
-.btn--shop-buy  { background: rgba(0,229,255,0.15); color: #00e5ff; border: 1px solid rgba(0,229,255,0.5); }
+.btn--shop-buy  { background: rgba(0,229,255,0.15); color: var(--col-primary); border: 1px solid rgba(0,229,255,0.5); }
 .btn--shop-buy:hover { background: rgba(0,229,255,0.28); }
 .btn--shop-poor { background: rgba(255,255,255,0.05); color: rgba(232,240,254,0.3); border: 1px solid rgba(255,255,255,0.1); cursor: not-allowed; }
-.btn--shop-maxed { background: rgba(46,204,113,0.12); color: #2ecc71; border: 1px solid rgba(46,204,113,0.35); cursor: default; }
+.btn--shop-maxed { background: rgba(46,204,113,0.12); color: var(--col-success); border: 1px solid rgba(46,204,113,0.35); cursor: default; }
 
 /* Coin award notice on game over */
 .game-over-coins {
@@ -920,6 +956,6 @@ button:active {
 .run-summary__value {
   font-size: 0.92rem;
   font-weight: 700;
-  color: #00e5ff;
+  color: var(--col-primary);
   letter-spacing: 1px;
 }
