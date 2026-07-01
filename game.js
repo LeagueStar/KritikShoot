@@ -1,34 +1,6 @@
 /**
- * KritikShoot — game.js  (v6 — Bug Fixes & Feature Pass)
- * ─────────────────────────────────────────────────────────────────────────────
- * v4 fixes retained (engine & input bugs).
- * v5 fixes retained (gameplay layer overhaul).
- *
- * v6 new changes (Section A — critical bug fixes):
- * A1. _bindListeners scope bug fixed — all let declarations and addEventListener
- *     calls now properly scoped inside the method body.
- * A2. O(n²) indexOf in bullet collision loop replaced with per-tick Map<Enemy,index>.
- * A3. O(n) indexOf on wall destruction replaced with dead-flag + single filter pass.
- * A4. Duplicate _hasLineOfSight extracted into Utils.hasLineOfSight().
- * A5. Boss collision dedup — boss added to collisionSeenSet on hit.
- * A6. Wall spawn exclusion zone (90px) around player spawn point.
- * A7. document.visibilitychange auto-pause on tab-away.
- * A8. Joystick auto-fire now gated on fsm.is(PLAYING) — no fire during PAUSED/LEVEL_UP.
- *
- * v6 new changes (Section B — performance / code quality):
- * B1. MetaProgression._upgradeMap — O(1) Map replaces UPGRADES.find() per tick.
- * B2. spawnParticles ring burst conditional on count >= 15.
- * B3. SpatialHash._key uses template string for large/negative coordinates.
- * B4. (deferred — ENEMY_DEFS refactor out of scope for this pass)
- * B5. ANON_KEY renamed LEADERBOARD_ANON_KEY with build-time env comment.
- *
- * v6 new changes (Section C — new features):
- * C1. WAVE_TRANSITION FSM state — 3-second countdown between waves.
- * C2. DamageNumber class — floating hit numbers above enemies/boss.
- * C3. Mobile weapon switch button (#weaponBtn) with label update.
- * C4. Run summary div injected into #gameOverActions on game over.
- * C5. AudioEngine mute toggle — persisted to localStorage "ks_muted".
- * ─────────────────────────────────────────────────────────────────────────────
+ * KritikShoot — game.js
+ * Vanilla JS top-down survival shooter. No dependencies.
  */
 
 "use strict";
@@ -144,7 +116,7 @@ const Utils = {
   },
 
   /**
-   * FIX 12 — Line-of-Sight raycasting helper.
+   * Line-of-Sight raycasting helper.
    * Returns true if the segment (x0,y0)→(x1,y1) intersects the AABB rect.
    * Uses the Liang–Barsky parametric clipping algorithm — branchless and cheap.
    */
@@ -197,7 +169,7 @@ class SpatialHash {
 
   clear() { this._map.clear(); }
 
-  _key(gx, gy) { return `${gx},${gy}`; }  // B3: string key avoids collision for large/negative coords
+  _key(gx, gy) { return `${gx},${gy}`; }  // string key avoids collision for large/negative coords
 
   insert(entity) {
     const r    = entity.size || 8;
@@ -240,7 +212,7 @@ const GameState = Object.freeze({
   PAUSED:          "PAUSED",
   LEVEL_UP:        "LEVEL_UP",
   GAME_OVER:       "GAME_OVER",
-  WAVE_TRANSITION: "WAVE_TRANSITION",  // C1: 3-second inter-wave countdown
+  WAVE_TRANSITION: "WAVE_TRANSITION",  // 3-second inter-wave countdown
 });
 
 class GameFSM {
@@ -294,7 +266,7 @@ const GlowCache = {
     const key = `${color}:${radius | 0}:${pad | 0}`;
     let   g   = this._map.get(key);
     if (!g) {
-      // FIX 5: evict the oldest entry when the cache exceeds 128 sprites
+      // evict the oldest entry when the cache exceeds 128 sprites
       if (this._map.size >= 128) {
         const oldestKey = this._map.keys().next().value;
         this._map.delete(oldestKey);
@@ -333,7 +305,7 @@ class TrailManager {
   }
 
   register(entity, color) {
-    // FIX 4: allocate a fixed-length array and a write-index pointer instead of
+    // allocate a fixed-length array and a write-index pointer instead of
     // a dynamic array that requires O(n) shift() on every push.
     const pts = new Array(this._maxLen).fill(null);
     this._trails.set(entity, { pts, color, writeIdx: 0, count: 0 });
@@ -346,7 +318,7 @@ class TrailManager {
   push(entity) {
     const t = this._trails.get(entity);
     if (!t) return;
-    // FIX 4: write to writeIdx % maxLen and advance pointer — O(1), no shift()
+    // write to writeIdx % maxLen and advance pointer — O(1), no shift()
     t.pts[t.writeIdx % this._maxLen] = { x: entity.x, y: entity.y };
     t.writeIdx++;
     if (t.count < this._maxLen) t.count++;
@@ -363,7 +335,7 @@ class TrailManager {
       ctx.lineCap     = "round";
       ctx.lineJoin    = "round";
       ctx.beginPath();
-      // FIX 4: read in insertion order — oldest slot is writeIdx % maxLen when buffer is full,
+      // read in insertion order — oldest slot is writeIdx % maxLen when buffer is full,
       // otherwise slot 0 is the oldest.
       const start = t.count < this._maxLen ? 0 : t.writeIdx % this._maxLen;
       for (let i = 0; i < t.count; i++) {
@@ -391,7 +363,6 @@ class TrailManager {
 class AudioEngine {
   constructor() {
     this._ctx = null;
-    // C5: mute toggle — persisted across sessions
     try { this.muted = localStorage.getItem("ks_muted") === "true"; }
     catch { this.muted = false; }
   }
@@ -407,14 +378,13 @@ class AudioEngine {
 
   // Shared envelope helper — connects osc → gain → dest, schedules stop
   _play(setupFn, duration = 0.25) {
-    if (this.muted) return;  // C5: bail early when muted
     try {
       const ctx  = this._getCtx();
       const gain = ctx.createGain();
       gain.connect(ctx.destination);
       const node = setupFn(ctx, gain);
       gain.gain.setValueAtTime(0, ctx.currentTime + duration);
-      // FIX 9: disconnect the gain node once the source finishes to prevent GainNode leaks
+      // disconnect the gain node once the source finishes to prevent GainNode leaks
       if (node && typeof node.addEventListener === "function") {
         node.addEventListener("ended", () => gain.disconnect(), { once: true });
       } else if (node && node.onended !== undefined) {
@@ -423,7 +393,6 @@ class AudioEngine {
     } catch (e) { /* AudioContext unavailable (e.g. unit tests) */ }
   }
 
-  // C5: toggle mute and persist
   toggleMute() {
     this.muted = !this.muted;
     try { localStorage.setItem("ks_muted", this.muted); } catch {}
@@ -441,7 +410,7 @@ class AudioEngine {
       osc.connect(gain);
       osc.start(ctx.currentTime);
       osc.stop(ctx.currentTime + 0.13);
-      return osc;   // FIX 9: return node so _play can hook onended for gain.disconnect()
+      return osc;   // return node so _play can hook onended for gain.disconnect()
     });
   }
 
@@ -472,9 +441,9 @@ class AudioEngine {
       src.connect(noiseGain);
       noiseGain.connect(ctx.destination);
       src.start(ctx.currentTime);
-      // FIX 9: disconnect the noise sub-graph when the buffer source ends
+      // disconnect the noise sub-graph when the buffer source ends
       src.onended = () => noiseGain.disconnect();
-      return osc;   // FIX 9: return primary node so _play hooks onended on the main gain
+      return osc;   // return primary node so _play hooks onended on the main gain
     }, 0.31);
   }
 
@@ -501,7 +470,7 @@ class AudioEngine {
       src.connect(bpf);
       bpf.connect(gain);
       src.start(ctx.currentTime);
-      return src;   // FIX 9: return node so _play can hook onended → gain.disconnect()
+      return src;   // return node so _play can hook onended → gain.disconnect()
     }, 0.19);
   }
 
@@ -517,7 +486,7 @@ class AudioEngine {
       osc.connect(gain);
       osc.start(ctx.currentTime);
       osc.stop(ctx.currentTime + 0.09);
-      return osc;   // FIX 9
+      return osc;
     }, 0.09);
   }
 
@@ -537,11 +506,11 @@ class AudioEngine {
         g2.connect(ctx.destination);
         osc.start(ctx.currentTime);
         osc.stop(ctx.currentTime + 0.15);
-        // FIX 9: disconnect each sub-gain when its oscillator ends
+        // disconnect each sub-gain when its oscillator ends
         osc.onended = () => g2.disconnect();
         if (!firstOsc) firstOsc = osc;
       }
-      return firstOsc;   // FIX 9: let _play hook gain.disconnect() via the first osc
+      return firstOsc;   // let _play hook gain.disconnect() via the first osc
     }, 0.15);
   }
 }
@@ -554,7 +523,7 @@ class AudioEngine {
 // Stat bonuses are applied multiplicatively on top of base CONFIG values
 // via MetaProgression.getBonus(key), which returns a flat additive value.
 //
-// FIX 5: Session cache — initSession() snapshots localStorage once at game
+// Session cache — initSession() snapshots localStorage once at game
 // start. All getBonus() calls during gameplay read from the in-memory cache.
 // localStorage is only written on purchase (write-on-change, not every frame).
 // =============================================================================
@@ -577,18 +546,18 @@ class MetaProgression {
     {
       id:      "health",
       label:   "❤ Max HP",
-      desc:    "+10 max HP per tier",
+      desc:    "+25 max HP per tier",
       maxTier: 8,
       cost:    tier => 30 + tier * 15,
-      bonus:   tiers => tiers * 10,
+      bonus:   tiers => tiers * 25,
     },
     {
       id:      "damage",
       label:   "💥 Damage",
-      desc:    "+2 damage per tier",
+      desc:    "+5 damage per tier",
       maxTier: 6,
       cost:    tier => 50 + tier * 25,
-      bonus:   tiers => tiers * 2,
+      bonus:   tiers => tiers * 5,
     },
     {
       id:      "speed",
@@ -651,13 +620,13 @@ class MetaProgression {
     return earned;
   }
 
-  // B1: static Map built at class definition time — O(1) lookup in getBonus()
+  // static Map built at class definition time — O(1) lookup in getBonus()
   // instead of UPGRADES.find() which is O(n) called every physics tick.
   static _upgradeMap = null;   // populated lazily after UPGRADES is defined
 
   // Returns the flat bonus value for a given upgrade id — reads from cache only
   static getBonus(id) {
-    // B1: build the map once on first call
+    // build the map once on first call
     if (!MetaProgression._upgradeMap) {
       MetaProgression._upgradeMap = new Map(MetaProgression.UPGRADES.map(u => [u.id, u]));
     }
@@ -690,9 +659,9 @@ class MetaProgression {
 
 // =============================================================================
 // SECTION 7 — BULLET
-// FIX 3 (interpolation): prevX/prevY cached before each move.
-// FIX 4 (dead-flag):     active=false on death; pool release is caller's job.
-//                        draw() skips inactive bullets; compaction done in bulk.
+// prevX/prevY cached before each move (temporal interpolation).
+// active=false on death; pool release is caller's job; draw() skips
+// inactive bullets, and compaction is done in bulk.
 // =============================================================================
 class Bullet {
   constructor() {
@@ -713,12 +682,11 @@ class Bullet {
     this.damage   = damage;
     this.isEnemy  = isEnemy;
     this.piercing = piercing;
-    // FIX 14: track how many enemies a piercing round has passed through
+    // track how many enemies a piercing round has passed through
     this.hitCount = 0;
     this.active   = true;
   }
 
-  // FIX 3: cache previous position before integrating
   update(dt) {
     this.prevX = this.x;
     this.prevY = this.y;
@@ -726,7 +694,6 @@ class Bullet {
     this.y += this.dy * dt;
   }
 
-  // FIX 3: render at interpolated position — eliminates micro-stutter at 120/144 Hz
   draw(ctx, alpha) {
     if (!this.active) return;
     const rx = Utils.lerp(this.prevX, this.x, alpha);
@@ -739,8 +706,7 @@ class Bullet {
 
 // =============================================================================
 // SECTION 8 — PARTICLE
-// FIX 3 (interpolation): prevX/prevY cached before each move.
-// FIX 4 (dead-flag):     active flag; draw skips inactive entries.
+// prevX/prevY cached before each move; active flag gates draw skipping.
 // =============================================================================
 class Particle {
   constructor() {
@@ -763,7 +729,6 @@ class Particle {
     this.active  = true;
   }
 
-  // FIX 3: cache previous position before integrating
   update(dt) {
     this.prevX = this.x;
     this.prevY = this.y;
@@ -775,7 +740,6 @@ class Particle {
     this.life -= dt;
   }
 
-  // FIX 3: interpolated draw position
   draw(ctx, alpha) {
     if (!this.active || this.size < 0.3) return;
     const lifeAlpha = Math.max(0, this.life / this.maxLife);
@@ -791,12 +755,12 @@ class Particle {
 
 // =============================================================================
 // SECTION 9 — PLAYER
-// FIX 1 (visual):        sharp fighter-jet triangle, toned glow, dark stroke
-// FIX 3 (interpolation): prevX/prevY cached; draw() lerps render position
-// FIX 6 (joystick):      joystickX/Y are pre-normalised [-1,1]; no /40 needed
-// FIX 7 (input buffer):  _shootBuffer latch survives fixed-step tick gaps
-// FIX 9 (caps):          speed capped at 800 px/s
-// FIX 10 (auto-aim):     _cachedAimAngle computed once in update(), reused everywhere
+// Sharp fighter-jet visual with toned glow and dark stroke. prevX/prevY are
+// cached each tick so draw() can lerp the render position. Joystick input is
+// a pre-normalised [-1,1] vector. Shoot input uses a one-tick latch buffer so
+// clicks between fixed-step ticks are never dropped. Speed is capped at
+// 800 px/s. Aim angle is cached once per tick in update() and reused by both
+// _shoot() and draw().
 // =============================================================================
 class Player {
   constructor(game) {
@@ -823,24 +787,23 @@ class Player {
     // Cycle with E or Shift; powerup "weapon_spread" / "weapon_laser" also sets it.
     this.weapon   = "default";
 
-    // C4: track shots fired per weapon for run summary
     this.weaponShots = { default: 0, spread: 0, laser: 0 };
 
-    // FIX 10: cached aim angle — computed once per tick in update()
+    // cached aim angle — computed once per tick in update()
     this._cachedAimAngle = 0;
   }
 
   get maxHealth()  { return CONFIG.PLAYER_BASE_HEALTH + this.upgrades.health * 20    + MetaProgression.getBonus("health"); }
-  // FIX 9: speed capped at 800 px/s so maxed meta + in-session upgrades can't break physics
+  // speed capped at 800 px/s so maxed meta + in-session upgrades can't break physics
   get speed()      { return Math.min(800, CONFIG.PLAYER_BASE_SPEED + (this.upgrades.speed * 30) + (this.buffs.speedBoost > 0 ? 150 : 0) + MetaProgression.getBonus("speed")); }
   get damage()     { return CONFIG.PLAYER_BASE_DAMAGE + (this.upgrades.damage * 2)   + MetaProgression.getBonus("damage"); }
-  // FIX 9: shootDelay floor already present — Math.max(0.05) prevents fire-rate breaking the loop
+  // shootDelay floor already present — Math.max(0.05) prevents fire-rate breaking the loop
   get shootDelay() { return Math.max(0.05, CONFIG.PLAYER_SHOOT_DELAY - (this.upgrades.fireRate * 0.02) - MetaProgression.getBonus("fireRate")); }
   get bulletSpd()  { return CONFIG.PLAYER_BULLET_SPEED + (this.upgrades.bulletSpeed * 30) + MetaProgression.getBonus("bulletSpeed"); }
   get critChance() { return this.upgrades.critChance * 0.05; }
   get lifesteal()  { return this.upgrades.lifesteal  * 0.05; }
 
-  // FIX 10: compute aim angle once per tick; shared by update() gate and _shoot() and draw()
+  // compute aim angle once per tick; shared by update() gate and _shoot() and draw()
   _computeAimAngle(input) {
     if (input.isMobile && this.game.enemies.length > 0) {
       let nearestDSq = Infinity, nearest = this.game.enemies[0];
@@ -853,14 +816,13 @@ class Player {
     return Math.atan2(input.mouseY - this.y, input.mouseX - this.x);
   }
 
-  // FIX 3: cache previous position before integrating
   update(dt, input) {
     if (!this.alive) return;
 
     this.prevX = this.x;
     this.prevY = this.y;
 
-    // FIX 10: compute aim angle once here for both shooting and draw()
+    // compute aim angle once here for both shooting and draw()
     this._cachedAimAngle = this._computeAimAngle(input);
 
     for (const key in this.buffs) {
@@ -869,7 +831,7 @@ class Player {
 
     let dx = 0, dy = 0;
     if (input.joystickActive) {
-      // FIX 6: joystickX/Y are already a normalised [-1,1] vector — no /40 needed
+      // joystickX/Y are already a normalised [-1,1] vector — no /40 needed
       dx = input.joystickX;
       dy = input.joystickY;
     } else {
@@ -890,7 +852,7 @@ class Player {
     this.x = Utils.clamp(this.x, this.size, this.game.width  - this.size);
     this.y = Utils.clamp(this.y, this.size, this.game.height - this.size);
 
-    // FIX 7: consume the shoot latch so clicks between ticks are never dropped
+    // consume the shoot latch so clicks between ticks are never dropped
     const wantsShoot = input.isShooting || input._shootBuffer;
     if (wantsShoot && (this.game.gameTime - this._lastShot) >= this.shootDelay) {
       input._shootBuffer = false;   // latch consumed
@@ -902,16 +864,16 @@ class Player {
     this._lastShot = this.game.gameTime;
     const audio    = this.game.audio;
 
-    // FIX 10: reuse the angle cached in update() — no redundant O(n) enemy scan
+    // reuse the angle cached in update() — no redundant O(n) enemy scan
     const angle = this._cachedAimAngle;
 
-    // C4: count shots per weapon for run summary
     this.weaponShots[this.weapon] = (this.weaponShots[this.weapon] || 0) + 1;
 
     // ── Weapon dispatch ────────────────────────────────────────────────────
     if (this.weapon === "spread") {
-      // Shotgun: 5 pellets in a 40° cone, lower individual damage
-      const PELLETS = 5;
+      // Shotgun: 6 pellets in a 40° cone. Per-pellet damage is 0.38× so total
+      // spread DPS ≈ 1.9× base — matching laser effective output at mid-range.
+      const PELLETS = 6;
       const SPREAD  = 0.35; // half-angle in radians
       audio.playSpread();
       for (let i = 0; i < PELLETS; i++) {
@@ -919,7 +881,7 @@ class Player {
         const ang    = angle + spread;
         const isCrit = Math.random() < this.critChance;
         const isRage = this.buffs.rage > 0;
-        const dmg    = ((isRage || isCrit) ? this.damage * 2 : this.damage) * 0.55;
+        const dmg    = ((isRage || isCrit) ? this.damage * 2 : this.damage) * 0.38;
         const color  = isCrit ? "#f1c40f" : isRage ? "#ff4757" : "#ff9f43";
         const b      = this.game.bulletPool.get();
         b.init(this.x, this.y,
@@ -980,9 +942,8 @@ class Player {
   }
 
   /**
-   * FIX 1: Sharp fighter-jet ship.
-   * FIX 3: Render position is lerped between prevX/prevY and x/y via alpha.
-   * FIX 10: Uses _cachedAimAngle instead of re-scanning enemies.
+   * Sharp fighter-jet ship. Render position is lerped between prevX/prevY
+   * and x/y via alpha; reuses _cachedAimAngle instead of re-scanning enemies.
    */
   draw(ctx, input, alpha) {
     if (!this.alive) return;
@@ -991,7 +952,7 @@ class Player {
     const rx = Utils.lerp(this.prevX, this.x, alpha);
     const ry = Utils.lerp(this.prevY, this.y, alpha);
 
-    // FIX 10: reuse the tick-cached angle — no duplicate O(n) enemy scan
+    // reuse the tick-cached angle — no duplicate O(n) enemy scan
     const angle = this._cachedAimAngle;
 
     ctx.save();
@@ -1014,13 +975,11 @@ class Player {
       ctx.stroke();
     }
 
-    // FIX 1: Reduced-intensity glow — pad is 0.6× instead of 1.8×
     const glow = GlowCache.get(this.color, s, s * 0.6);
     ctx.globalAlpha = 0.45;
     ctx.drawImage(glow.canvas, -glow.half, -glow.half);
     ctx.globalAlpha = 1.0;
 
-    // FIX 1: Thruster flame (drawn before hull so hull renders on top)
     const flicker   = 0.8 + Math.sin(this.game.gameTime * 40) * 0.2;
     const flameGrad = ctx.createLinearGradient(-s * 0.25, 0, -s * 1.1 * flicker, 0);
     flameGrad.addColorStop(0, `rgba(255,200,80,${0.95 * flicker})`);
@@ -1034,7 +993,6 @@ class Player {
     ctx.closePath();
     ctx.fill();
 
-    // FIX 1: Fighter-jet hull path
     ctx.beginPath();
     ctx.moveTo( s * 1.1,   0);
     ctx.lineTo( s * 0.1,   s * 0.18);
@@ -1049,7 +1007,6 @@ class Player {
     ctx.fillStyle = this.color;
     ctx.fill();
 
-    // FIX 1: Dark hard-edge stroke
     ctx.strokeStyle = "rgba(5,8,16,0.8)";
     ctx.lineWidth   = 1.5;
     ctx.stroke();
@@ -1067,9 +1024,9 @@ class Player {
 
 // =============================================================================
 // SECTION 10 — ENEMY
-// FIX 3  (interpolation):  prevX/prevY cached; draw() lerps render position
-// FIX 12 (LoS):            _hasLineOfSight() gates ranged fire
-// FIX 13 (orbit dir):      orbitDirection assigned randomly at spawn
+// prevX/prevY cached so draw() can lerp the render position. Ranged enemies
+// gate fire behind _hasLineOfSight(). orbitDirection is assigned randomly at
+// spawn so ranged enemies don't all strafe the same way.
 // =============================================================================
 class Enemy {
   constructor(game, x, y, type, waveFactor) {
@@ -1079,6 +1036,7 @@ class Enemy {
     this.prevX = x;
     this.prevY = y;
     this.type  = type;
+    this.alive = true;
 
     const baseHp   = 20 + Math.floor(waveFactor * 10);
     this.damage    = 10 + Math.floor(waveFactor * 2);
@@ -1095,7 +1053,7 @@ class Enemy {
         this.color = "#00e5ff"; this.size = 18 * game.uiScale; this.speed = 60;
         this.hp = baseHp * 0.8; this.shootDelay = 1.2;
         this._preferredDist  = 260 * game.uiScale;
-        // FIX 13: randomise orbit direction so enemies don't all strafe the same way
+        // randomise orbit direction so enemies don't all strafe the same way
         this.orbitDirection  = Math.random() < 0.5 ? 1 : -1;
         break;
       case "fast":
@@ -1122,7 +1080,6 @@ class Enemy {
     return Utils.hasLineOfSight(this.game, this.x, this.y, player.x, player.y);
   }
 
-  // FIX 3: cache previous position before integrating
   update(dt, player) {
     this.prevX = this.x;
     this.prevY = this.y;
@@ -1133,11 +1090,11 @@ class Enemy {
     const angle = Math.atan2(toDy, toDx);
 
     // ── Ranged: orbit at preferred distance
-    // FIX 13: use this.orbitDirection (±1) so ranged enemies alternate CW/CCW
+    // use this.orbitDirection (±1) so ranged enemies alternate CW/CCW
     let sdx, sdy;
     if (this.type === "ranged" && this._preferredDist) {
       const diff = dist - this._preferredDist;
-      // FIX 13: orbitDirection flips the perpendicular strafe component
+      // orbitDirection flips the perpendicular strafe component
       const strafeAng = angle + Math.PI * 0.5 * this.orbitDirection;
       const strafeStr = 0.6;
       if (Math.abs(diff) > 40) {
@@ -1180,7 +1137,7 @@ class Enemy {
     if (!this.game.checkWallCollision(nx, ny, this.size)) { this.x = nx; this.y = ny; }
 
     const timeSinceShot = this.game.gameTime - this._lastShot;
-    // FIX 12: ranged enemies must have LoS before firing; others fire freely
+    // ranged enemies must have LoS before firing; others fire freely
     const canFire = (this.type === "ranged")
       ? timeSinceShot >= this.shootDelay && this._hasLineOfSight(player)
       : timeSinceShot >= this.shootDelay && !this.game.checkWallCollision(this.x, this.y, this.size);
@@ -1279,6 +1236,23 @@ class Enemy {
     ctx.globalAlpha = 1;
 
     ctx.restore();
+
+    // HP bar — only shown when enemy is damaged; 4px tall, centred above enemy
+    if (this.hp < this.maxHp && this.maxHp > 0) {
+      const barW = s * 2.2;
+      const barH = 4;
+      const barX = rx - barW / 2;
+      const barY = ry - s - 10;
+      const frac = Math.max(0, this.hp / this.maxHp);
+      ctx.save();
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle   = "rgba(0,0,0,0.6)";
+      ctx.fillRect(barX, barY, barW, barH);
+      const hue     = Math.round(frac * 120);   // 120=green → 0=red as HP drops
+      ctx.fillStyle = `hsl(${hue},100%,50%)`;
+      ctx.fillRect(barX, barY, barW * frac, barH);
+      ctx.restore();
+    }
   }
 }
 
@@ -1297,6 +1271,7 @@ class Boss {
     this.y      = -80;          // enters from top-center
     this.prevX  = this.x;
     this.prevY  = this.y;
+    this.alive  = true;
     this.size   = 52 * game.uiScale;
     this.color  = "#ff2d55";
     this.speed  = 80;
@@ -1392,7 +1367,7 @@ class Boss {
       case "rest": {
         this._phaseTimer += dt;
 
-        // FIX 12: during the rest pause, fire a targeted 3-round burst at the
+        // during the rest pause, fire a targeted 3-round burst at the
         // player only if there is clear LoS — boss can't shoot through walls.
         const sinceShot = this.game.gameTime - this._lastShot;
         if (sinceShot >= 0.55 && this._phaseTimer < 1.2 && this._hasLineOfSight(player)) {
@@ -1562,29 +1537,34 @@ class Boss {
 
 // =============================================================================
 // SECTION 11 — INPUT MANAGER
-// FIX 6 (joystick):   _updateJoystick now stores a normalised [-1,1] unit vector
+// _updateJoystick now stores a normalised [-1,1] unit vector
 //                      instead of raw pixels, so movement is decoupled from CSS size
-// FIX 7 (buffer):     _shootBuffer latch set on mousedown / touchstart so clicks
+// _shootBuffer latch set on mousedown / touchstart so clicks
 //                      between fixed-step ticks are never silently dropped
-// FIX 8 (hotkey):     weapon cycle moved to E / Shift — Tab hijacks focus,
+// weapon cycle moved to E / Shift — Tab hijacks focus,
 //                      Q is reserved for quit-in-pause
 // =============================================================================
 class InputManager {
   constructor(game) {
-    this._game          = game;   // A8: reference for FSM state check in joystick auto-fire
+    this._game          = game;   // reference for FSM state check in joystick auto-fire
     this.keys           = {};
     this.mouseX         = 0;
     this.mouseY         = 0;
     this.isShooting     = false;
-    this._shootBuffer   = false;   // FIX 7: latch for sub-tick clicks
+    this._shootBuffer   = false;   // latch for sub-tick clicks
     this.joystickActive = false;
-    this.joystickX      = 0;       // FIX 6: normalised [-1,1]
-    this.joystickY      = 0;       // FIX 6: normalised [-1,1]
-    this.isMobile       = /Mobi|Android/i.test(navigator.userAgent) || window.innerWidth <= 768;
+    this.joystickX      = 0;       // normalised [-1,1]
+    this.joystickY      = 0;       // normalised [-1,1]
     this._pausePressed  = false;
     this._quitPressed   = false;
-    this._weaponPressed = false;   // C3: mobile weapon switch button
+    this._weaponPressed = false;   // mobile weapon switch button
     this._bindListeners();
+  }
+
+  // Re-evaluates on every read so rotating a tablet or resizing a window
+  // is picked up immediately, instead of being locked in at construction time.
+  get isMobile() {
+    return /Mobi|Android|iPad|iPhone/i.test(navigator.userAgent) || window.innerWidth <= 1024;
   }
 
   _bindListeners() {
@@ -1603,7 +1583,7 @@ class InputManager {
     });
     window.addEventListener("mousedown", () => {
       this.isShooting  = true;
-      this._shootBuffer = true;   // FIX 7: latch so the next eligible tick fires
+      this._shootBuffer = true;   // latch so the next eligible tick fires
     });
     window.addEventListener("mouseup",   () => { this.isShooting = false; });
 
@@ -1624,7 +1604,7 @@ class InputManager {
           this.mouseX      = t.clientX - rect.left;
           this.mouseY      = t.clientY - rect.top;
           this.isShooting  = true;
-          this._shootBuffer = true;   // FIX 7: latch on touch too
+          this._shootBuffer = true;   // latch on touch too
         }
       }
     }, { passive: false });
@@ -1688,16 +1668,16 @@ class InputManager {
       }
     });
 
-    // A8: auto-fire only fires when game is in PLAYING state
+    // auto-fire only fires when game is in PLAYING state
     const _origUpdateJoy = this._updateJoystick.bind(this);
     this._updateJoystick = (touch, bx, by, k) => {
       _origUpdateJoy(touch, bx, by, k);
       // joystickX/Y are now [-1,1]; threshold 0.2 avoids firing in dead-zone
       const moving = Math.hypot(this.joystickX, this.joystickY) > 0.2;
-      // A8: only set isShooting when actually PLAYING — prevents auto-fire during PAUSED/LEVEL_UP
+      // only set isShooting when actually PLAYING — prevents auto-fire during PAUSED/LEVEL_UP
       if (moving && this._game && this._game.fsm.is(GameState.PLAYING)) {
         this.isShooting  = true;
-        this._shootBuffer = true;   // FIX 7
+        this._shootBuffer = true;
       }
     };
 
@@ -1705,7 +1685,7 @@ class InputManager {
       shootBtn.addEventListener("touchstart", e => {
         e.preventDefault();
         this.isShooting  = true;
-        this._shootBuffer = true;   // FIX 7
+        this._shootBuffer = true;
       });
       shootBtn.addEventListener("touchend",   e => { e.preventDefault(); this.isShooting = false; });
     }
@@ -1722,7 +1702,6 @@ class InputManager {
       quitBtn.addEventListener("click", () => { this._quitPressed = true; });
     }
 
-    // C3: weapon switch button on mobile
     const weaponBtn = document.getElementById("weaponBtn");
     if (weaponBtn) {
       weaponBtn.addEventListener("touchstart", e => {
@@ -1733,7 +1712,7 @@ class InputManager {
     }
   }
 
-  // FIX 6: store a normalised [-1,1] unit vector scaled by deflection ratio.
+  // store a normalised [-1,1] unit vector scaled by deflection ratio.
   // Player.update() multiplies directly by this.speed — no /40 coupling to CSS.
   _updateJoystick(touch, baseX, baseY, knob) {
     const maxRadius = 40;
@@ -1759,7 +1738,7 @@ class UIManager {
   constructor(game) {
     this.game = game;
 
-    // FIX 6: load scores once at construction — _saveScore and _renderLeaderboard
+    // load scores once at construction — _saveScore and _renderLeaderboard
     // read/write this._scores in memory; localStorage is only touched on mutation.
     try {
       this._scores = JSON.parse(localStorage.getItem("ks_scores") || "[]");
@@ -1782,7 +1761,6 @@ class UIManager {
   }
 
   _bindUI() {
-    // C5: initialise mute button emoji to match current audio state
     const muteBtn = document.getElementById("muteBtn");
     if (muteBtn) {
       muteBtn.textContent = this.game.audio.muted ? "🔇" : "🔊";
@@ -1801,7 +1779,7 @@ class UIManager {
         localStorage.setItem("ks_nickname", name);
         this._el.startScreen.classList.add("hidden");
         this._el.coinShop?.classList.add("hidden");
-        if (this.game.input.isMobile || window.innerWidth <= 768) {
+        if (this._shouldShowMobileUI()) {
           this._el.mobileUI.classList.add("mobile-ui--active");
         }
         this.game.start();
@@ -1814,7 +1792,7 @@ class UIManager {
         this._el.gameOverActions.classList.add("hidden");
         document.getElementById("gameOverCoins")?.classList.add("hidden");
         this._el.coinShop?.classList.add("hidden");
-        if (this.game.input.isMobile || window.innerWidth <= 768) {
+        if (this._shouldShowMobileUI()) {
           this._el.mobileUI.classList.add("mobile-ui--active");
         }
         this.game.start();
@@ -1848,6 +1826,19 @@ class UIManager {
     });
   }
 
+  // Returns true if mobile controls should be shown. Checks the live isMobile
+  // getter (catches orientation changes) and also detects landscape touch devices
+  // that wouldn't pass the portrait width threshold alone.
+  _shouldShowMobileUI() {
+    if (this.game.input.isMobile) return true;
+    const isLandscapeTouch = (
+      navigator.maxTouchPoints > 0 &&
+      screen.orientation &&
+      screen.orientation.type.startsWith("landscape")
+    );
+    return isLandscapeTouch;
+  }
+
   showLevelUp() {
     this.game.fsm.transition(GameState.LEVEL_UP);
     this._el.levelUp.classList.remove("hidden");
@@ -1876,7 +1867,6 @@ class UIManager {
     const coinsEarned = MetaProgression.awardCoins(g.wave, g.gameTime);
     this._lastCoinsEarned = coinsEarned;
 
-    // C4: Run summary — inject before action buttons
     const p = g.player;
     const mostUsedWeapon = Object.entries(p.weaponShots)
       .reduce((best, [w, cnt]) => cnt > best[1] ? [w, cnt] : best, ["default", -1])[0];
@@ -1908,83 +1898,10 @@ class UIManager {
       coinsEl.textContent = `+${coinsEarned} coins earned`;
       coinsEl.classList.remove("hidden");
     }
-
-    // ── Remote leaderboard: POST to your Supabase (or any REST) endpoint ─
-    // Replace the URL string below with your actual endpoint.
-    // The score object matches whatever schema you set up.
-    this._postScoreRemote({
-      name,
-      wave:  g.wave,
-      time:  +g.gameTime.toFixed(1),
-      level: g.player.stats.level,
-      kills: g.kills,
-    });
-  }
-
-  /**
-   * Posts a score to a remote REST endpoint.
-   * Swap LEADERBOARD_URL for your Supabase row-insert endpoint, e.g.:
-   *   https://<project>.supabase.co/rest/v1/scores
-   * Add your anon key as the apikey / Authorization header.
-   *
-   * The function is intentionally fire-and-forget: failures are silently logged.
-   *
-   * FIX 2 — SECURITY NOTE (documentation only, no code change):
-   * ─────────────────────────────────────────────────────────────
-   * The Supabase anon key below is a CLIENT-SIDE PUBLIC key — it is visible
-   * to anyone who opens DevTools.  Before shipping:
-   *
-   *   1. NEVER commit the real anon key to a public repository.
-   *      Use an environment variable or a build-time substitution step,
-   *      and add the key literal to .gitignore / secret scanning rules.
-   *
-   *   2. Enable Row-Level Security (RLS) on the `scores` table in Supabase.
-   *      Grant the `anon` role INSERT permission only — never SELECT on other
-   *      users' rows, never UPDATE or DELETE.  This ensures a leaked key can
-   *      only append new scores, not read or destroy existing data.
-   *
-   *      Example RLS policy (Supabase SQL editor):
-   *        CREATE POLICY "anon insert only"
-   *          ON scores FOR INSERT TO anon WITH CHECK (true);
-   * ─────────────────────────────────────────────────────────────
-   */
-  // FIX 1: one-time flag so the "not wired up" info log fires only once per session
-  async _postScoreRemote(scoreObj) {
-    const LEADERBOARD_URL = "https://YOUR_PROJECT.supabase.co/rest/v1/scores";
-    // B5: renamed from ANON_KEY to LEADERBOARD_ANON_KEY for clarity.
-    // TODO: inject via build-time env var (Vite: import.meta.env.VITE_ANON_KEY).
-    // Never commit a real key here. This placeholder is intentional.
-    const LEADERBOARD_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
-
-    // FIX 1: guard — bail out silently when the URL is still the placeholder
-    if (LEADERBOARD_URL.includes("YOUR_PROJECT")) {
-      if (!UIManager._remoteSkipLogged) {
-        console.info("[KS] _postScoreRemote: remote leaderboard not configured " +
-          "(URL still contains 'YOUR_PROJECT'). Skipping remote POST.");
-        UIManager._remoteSkipLogged = true;
-      }
-      return;
-    }
-
-    try {
-      const res = await fetch(LEADERBOARD_URL, {
-        method:  "POST",
-        headers: {
-          "Content-Type":  "application/json",
-          "apikey":        LEADERBOARD_ANON_KEY,
-          "Authorization": `Bearer ${LEADERBOARD_ANON_KEY}`,
-          "Prefer":        "return=minimal",
-        },
-        body: JSON.stringify(scoreObj),
-      });
-      if (!res.ok) console.warn("[KS] Leaderboard post failed:", res.status);
-    } catch (err) {
-      console.warn("[KS] Leaderboard post error:", err);
-    }
   }
 
   _saveScore(name, wave, time, level) {
-    // FIX 6: mutate in-memory array; write to localStorage only once here
+    // mutate in-memory array; write to localStorage only once here
     this._scores.push({ name, wave, time: +time.toFixed(1), level, date: new Date().toLocaleDateString() });
     this._scores.sort((a, b) => b.wave - a.wave || b.time - a.time);
     const seen = new Set();
@@ -1998,7 +1915,7 @@ class UIManager {
   }
 
   _renderLeaderboard() {
-    // FIX 6: read from in-memory cache — no localStorage parse on every render
+    // read from in-memory cache — no localStorage parse on every render
     const scores = this._scores;
     if (scores.length === 0) {
       this._el.leaderboard.innerHTML = `<p class="leaderboard__empty">No records yet. Be the first.</p>`;
@@ -2136,6 +2053,16 @@ class UIManager {
       ctx.font      = `600 ${Math.max(11, 14 * s)}px ${CONFIG.HUD_FONT}`;
       ctx.fillStyle = "rgba(232,240,254,0.35)";
       ctx.fillText("Q — Quit to Main Menu  |  E / Shift — cycle weapon", g.width / 2, g.height / 2 + 34 * s);
+
+      // Stats panel — single muted line below controls hint
+      if (state === GameState.PAUSED) {
+        const ws = g.player?.weaponShots || { default: 0, spread: 0, laser: 0 };
+        const statLine = `Wave ${g.wave} · Kills ${g.kills} · ${g.gameTime.toFixed(1)}s` +
+          ` · GUN:${ws.default} SHOT:${ws.spread} LASER:${ws.laser}`;
+        ctx.font      = `600 ${Math.max(10, 12 * s)}px ${CONFIG.HUD_FONT}`;
+        ctx.fillStyle = "rgba(232,240,254,0.22)";
+        ctx.fillText(statLine, g.width / 2, g.height / 2 + 58 * s);
+      }
       ctx.textAlign = "left";
     }
 
@@ -2179,7 +2106,13 @@ class UIManager {
 // Lightweight floating text that pops up at hit locations and drifts upward.
 // =============================================================================
 class DamageNumber {
-  constructor(x, y, value, isCrit, isBoss) {
+  constructor() {
+    this.x = 0; this.y = 0; this.value = 0;
+    this.isCrit = false; this.isBoss = false;
+    this.life = 0; this.maxLife = 0; this.vy = 0;
+  }
+
+  init(x, y, value, isCrit, isBoss) {
     this.x       = x;
     this.y       = y;
     this.value   = value;
@@ -2187,7 +2120,17 @@ class DamageNumber {
     this.isBoss  = isBoss;
     this.life    = 0.85;
     this.maxLife = 0.85;
-    this.vy      = -58;   // drift upward at 58 px/s
+    this.vy      = -58;
+  }
+
+  static get(x, y, value, isCrit, isBoss) {
+    const dn = DamageNumber._pool.pop() || new DamageNumber();
+    dn.init(x, y, value, isCrit, isBoss);
+    return dn;
+  }
+
+  static release(dn) {
+    DamageNumber._pool.push(dn);
   }
 
   update(dt) {
@@ -2203,17 +2146,14 @@ class DamageNumber {
     ctx.textAlign    = "center";
     ctx.textBaseline = "middle";
     if (this.isBoss) {
-      // Boss hit: red, bold 17px
       ctx.fillStyle = "#ff2d55";
       ctx.font      = "bold 17px 'Rajdhani', sans-serif";
       ctx.fillText(String(this.value), this.x, this.y);
     } else if (this.isCrit) {
-      // Crit: gold, bold 17px, prepend ✕
       ctx.fillStyle = "#f1c40f";
       ctx.font      = "bold 17px 'Rajdhani', sans-serif";
       ctx.fillText(`✕${this.value}`, this.x, this.y);
     } else {
-      // Normal: white, bold 14px
       ctx.fillStyle = "#ffffff";
       ctx.font      = "bold 14px 'Rajdhani', sans-serif";
       ctx.fillText(String(this.value), this.x, this.y);
@@ -2221,20 +2161,22 @@ class DamageNumber {
     ctx.restore();
   }
 }
+// Static pool must be declared after the class body
+DamageNumber._pool = [];
 
 
 // =============================================================================
 // SECTION 13 — GAME (Core Engine)
-// FIX 2: this.collisionSeenSet hoisted here — cleared each tick, never newed
-// FIX 3: _loop computes alpha = accumulator / FIXED_STEP, passes to _draw
-// FIX 4: _deadBullets / _deadParticles counters drive threshold compaction
+// this.collisionSeenSet hoisted here — cleared each tick, never newed
+// _loop computes alpha = accumulator / FIXED_STEP, passes to _draw
+// _deadBullets / _deadParticles counters drive threshold compaction
 // =============================================================================
 class Game {
   constructor() {
     this.canvas = document.getElementById("gameCanvas");
     this.ctx    = this.canvas.getContext("2d");
 
-    this.input = new InputManager(this);   // A8: pass game so joystick auto-fire can check FSM state
+    this.input = new InputManager(this);   // pass game so joystick auto-fire can check FSM state
     this.audio = new AudioEngine();        // FIX: must be created BEFORE UIManager so _bindUI() can safely read this.game.audio
     this.ui    = new UIManager(this);
 
@@ -2255,27 +2197,23 @@ class Game {
     this._FIXED_STEP  = 1 / 60;
     this._accumulator = 0;
 
-    // FIX 2: hoisted dedup Set — reused via .clear() instead of new Set() each tick
+    // hoisted dedup Set — reused via .clear() instead of new Set() each tick
     this.collisionSeenSet = new Set();
 
-    // FIX 4: dead-slot counters for threshold-based compaction
+    // dead-slot counters for threshold-based compaction
     this._deadBullets   = 0;
     this._deadParticles = 0;
 
     this._resize();
     window.addEventListener("resize", () => this._resize());
 
-    // A7: auto-pause when player tabs away
+    // auto-pause when player tabs away
     document.addEventListener("visibilitychange", () => {
       if (document.hidden && this.fsm.is(GameState.PLAYING)) {
         this.fsm.transition(GameState.PAUSED);
       }
     });
   }
-  triggerDamageFlash(intensity = 1.0) {
-  this.damageFlash = Math.min(1, this.damageFlash + 0.35 * intensity);
-  this.cameraShake = Math.max(this.cameraShake, CONFIG.SHAKE_MAX * 0.6 * intensity);
-}
 
   _wireFSM() {
     this.fsm
@@ -2297,14 +2235,21 @@ class Game {
         enter: () => { this.ui.showGameOver(); },
       })
       .register(GameState.WAVE_TRANSITION, {
-        // C1: No enter/exit side-effects needed; timer is polled in _loop
+        // No enter/exit side-effects needed; timer is polled in _loop
+      })
+      .register(GameState.LEVEL_UP, {
+        enter: () => {},
+        exit:  () => {},
       });
   }
 
   _resize() {
     this.width  = this.canvas.width  = window.innerWidth;
     this.height = this.canvas.height = window.innerHeight;
-    this.uiScale = Utils.clamp(Math.min(this.width / 800, this.height / 600), 0.7, 2.0);
+    const isLandscapeMobile = window.innerWidth > window.innerHeight && window.innerHeight < 500;
+    this.uiScale = isLandscapeMobile
+      ? Utils.clamp(Math.min(this.width / 800, this.height / 400), 0.55, 1.2)
+      : Utils.clamp(Math.min(this.width / 800, this.height / 600), 0.7, 2.0);
     document.documentElement.style.setProperty("--ui-scale", this.uiScale);
     GlowCache.clear();
   }
@@ -2339,20 +2284,21 @@ class Game {
     this._accumulator = 0;
     this.trailMgr.clear();
 
-    // FIX 4: reset dead-slot counters
+    // reset dead-slot counters
     this._deadBullets   = 0;
     this._deadParticles = 0;
 
     this.fsm.transition(GameState.PLAYING);
-    MetaProgression.initSession();   // FIX 5: snapshot LS once per run
+    MetaProgression.initSession();   // snapshot LS once per run
     this._spawnWalls();
-    this._spawnWave();   // FIX 11: budget-based wave instead of N random enemies
+    this._spawnWave();   // budget-based wave instead of N random enemies
 
-    // C1: inter-wave countdown timer (seconds remaining in WAVE_TRANSITION)
     this._waveTransitionTimer = 0;
 
-    // C2: floating damage numbers array
     this.damageNumbers = [];
+
+    const weaponBtn = document.getElementById("weaponBtn");
+    if (weaponBtn) weaponBtn.textContent = "GUN";
 
     this._rafId = requestAnimationFrame(ts => this._loop(ts));
   }
@@ -2375,7 +2321,6 @@ class Game {
       }
     }
 
-    // C1: WAVE_TRANSITION — tick the countdown, skip entity updates
     if (this.fsm.is(GameState.WAVE_TRANSITION)) {
       this._waveTransitionTimer -= frameDt;
       if (this._waveTransitionTimer <= 0) {
@@ -2384,6 +2329,7 @@ class Game {
         this.cameraShake = Math.max(this.cameraShake, CONFIG.SHAKE_MAX);
         if (this.wave % 5 === 0) {
           this.boss = new Boss(this);
+          this._bossWarning = false;   // clear warning now that boss has spawned
         } else {
           this._spawnWave();
         }
@@ -2393,7 +2339,7 @@ class Game {
       }
     }
 
-    // FIX 3: temporal interpolation factor — fraction of a physics tick
+    // temporal interpolation factor — fraction of a physics tick
     // already elapsed at the moment we're rendering this frame.
     // Passed to _draw so every entity renders at its sub-tick position.
     const alpha = this._accumulator / this._FIXED_STEP;
@@ -2418,8 +2364,8 @@ class Game {
       this.ui.quitToMenu();
     }
 
-    // FIX 8: weapon cycle on E or Shift — Tab hijacks browser focus, Q is quit
-    // C3: also handle _weaponPressed from mobile weapon button
+    // weapon cycle on E or Shift — Tab hijacks browser focus, Q is quit
+    // also handle _weaponPressed from mobile weapon button
     if ((this.input.keys["e"] || this.input.keys["shift"] || this.input._weaponPressed) && state === GameState.PLAYING) {
       this.input.keys["e"]       = false;
       this.input.keys["shift"]   = false;
@@ -2427,7 +2373,6 @@ class Game {
       const modes = ["default", "spread", "laser"];
       const idx   = modes.indexOf(this.player.weapon);
       this.player.weapon = modes[(idx + 1) % modes.length];
-      // C3: update mobile weapon button label
       const weaponBtn = document.getElementById("weaponBtn");
       if (weaponBtn) {
         const labels = { default: "GUN", spread: "SHOT", laser: "LASER" };
@@ -2439,13 +2384,13 @@ class Game {
   // ── Fixed-step physics update ──────────────────────────────────────────────
 
   _update(dt) {
-    dt = Math.min(dt, 0.1);   // FIX 7: cap dt so paused/backgrounded tabs don't cause teleporting
+    dt = Math.min(dt, 0.1);   // cap dt so paused/backgrounded tabs don't cause teleporting
     this.gameTime += dt;
 
     this.spatialHash.clear();
     for (const e of this.enemies) this.spatialHash.insert(e);
 
-    // A2: build an O(1) enemy→index map once per tick; avoids indexOf inside bullet loop
+    // build an O(1) enemy→index map once per tick; avoids indexOf inside bullet loop
     const enemyIndexMap = new Map();
     for (let i = 0; i < this.enemies.length; i++) enemyIndexMap.set(this.enemies[i], i);
 
@@ -2453,6 +2398,7 @@ class Game {
 
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
+      if (!e.alive) continue;
       e.update(dt, this.player);
       if (e.hp <= 0) this._handleEnemyDeath(e, i);
     }
@@ -2464,7 +2410,6 @@ class Game {
     // ── Bullets ───────────────────────────────────────────────────────────
     for (let i = 0; i < this.bullets.length; i++) {
       const b = this.bullets[i];
-      // FIX 4: skip already-dead slots; they'll be compacted in bulk below
       if (!b.active) continue;
 
       const bx0 = b.x;
@@ -2480,7 +2425,7 @@ class Game {
         if (wall.hp !== undefined) {
           wall.hp -= b.damage;
           if (wall.hp <= 0) {
-            // A3: mark dead — compact in a single pass after the loop (avoids O(n) indexOf)
+            // mark dead — compact in a single pass after the loop (avoids O(n) indexOf)
             wall.dead = true;
           }
         }
@@ -2513,20 +2458,20 @@ class Game {
           const midY = (by0 + b.y) * 0.5;
           const candidates = this.spatialHash.query(midX, midY, b.size + 60);
 
-          // FIX 2: reuse hoisted Set — clear() is O(n) on entries, not an allocation
+          // reuse hoisted Set — clear() is O(n) on entries, not an allocation
           this.collisionSeenSet.clear();
 
           for (const e of candidates) {
             if (this.collisionSeenSet.has(e)) continue;
+            if (!e.alive) continue;
             this.collisionSeenSet.add(e);
             const t = Utils.sweepCircle(bx0, by0, b.x, b.y, e.x, e.y, b.size + e.size);
             if (t >= 0) {
               const isCrit  = Math.random() < this.player.critChance;
               const dmgDealt = b.damage * (isCrit ? 2 : 1);
               e.hp -= dmgDealt;
-              // C2: spawn floating damage number at hit position
-              this.damageNumbers.push(new DamageNumber(b.x, b.y, Math.ceil(dmgDealt), isCrit, false));
-              // FIX 14: count pierce hits; destroy bullet after MAX_PIERCE enemies
+              this.damageNumbers.push(DamageNumber.get(b.x, b.y, Math.ceil(dmgDealt), isCrit, false));
+              // count pierce hits; destroy bullet after MAX_PIERCE enemies
               if (b.piercing) {
                 b.hitCount++;
                 if (b.hitCount >= 4) hit = true;   // nerf: cap at 4 penetrations
@@ -2539,7 +2484,7 @@ class Game {
                   this.player.health + b.damage * this.player.lifesteal
                 );
               }
-              // A2: O(1) index lookup via pre-built map
+              // O(1) index lookup via pre-built map
               const ei = enemyIndexMap.get(e);
               if (e.hp <= 0 && ei !== undefined) this._handleEnemyDeath(e, ei);
               if (hit) break;  // stop scanning once this bullet is spent
@@ -2547,15 +2492,14 @@ class Game {
           }
 
           // Also check boss as a target for player bullets
-          if (!hit && this.boss) {
+          if (!hit && this.boss?.alive) {
             const t = Utils.sweepCircle(bx0, by0, b.x, b.y, this.boss.x, this.boss.y, b.size + this.boss.size);
             if (t >= 0) {
               const dmgDealt = b.damage * 0.5; // 50 % resistance
               this.boss.hp -= dmgDealt;
-              // A5: add boss to seenSet so piercing bullets don't double-hit in same frame
+              // add boss to seenSet so piercing bullets don't double-hit in same frame
               this.collisionSeenSet.add(this.boss);
-              // C2: floating number for boss hit
-              this.damageNumbers.push(new DamageNumber(b.x, b.y, Math.ceil(dmgDealt), false, true));
+              this.damageNumbers.push(DamageNumber.get(b.x, b.y, Math.ceil(dmgDealt), false, true));
               this.spawnParticles(b.x, b.y, b.color, 4);
               if (!b.piercing) hit = true;
             }
@@ -2568,7 +2512,6 @@ class Game {
       }
 
       if (hit) {
-        // FIX 4: mark dead + release to pool; do NOT splice here
         b.active = false;
         this.bulletPool.release(b);
         this.trailMgr.unregister(b);
@@ -2576,12 +2519,24 @@ class Game {
       }
     }
 
-    // A3: compact walls that were killed by bullets (dead-flag pattern)
+    // compact walls that were killed by bullets (dead-flag pattern)
     if (this.walls.some(w => w.dead)) {
       this.walls = this.walls.filter(w => !w.dead);
+      // Rebuild wallHash so destroyed walls no longer appear as candidates
+      if (this._wallHash) {
+        this._wallHash.clear();
+        const _insertRect = (r) => {
+          const cx = r.x + r.w / 2;
+          const cy = r.y + r.h / 2;
+          const sz = Math.sqrt(r.w * r.w + r.h * r.h) / 2;
+          this._wallHash.insert({ x: cx, y: cy, size: sz, _rect: r });
+        };
+        for (const w of this.walls)  _insertRect(w);
+        for (const c of this.crates) _insertRect(c);
+      }
     }
 
-    // FIX 4: bulk-compact bullets when dead slots exceed threshold fraction
+    // bulk-compact bullets when dead slots exceed threshold fraction
     if (this._deadBullets > 0 &&
         this._deadBullets / this.bullets.length >= CONFIG.COMPACT_THRESHOLD_BULLETS) {
       // Single linear pass — filter in place, no secondary array allocation
@@ -2606,20 +2561,18 @@ class Game {
     // ── Particles ─────────────────────────────────────────────────────────
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
-      // FIX 4: skip dead slots
       if (!p.active) continue;
 
       p.update(dt);
 
       if (p.life <= 0) {
-        // FIX 4: mark dead + release; no splice
         p.active = false;
         this.particlePool.release(p);
         this._deadParticles++;
       }
     }
 
-    // FIX 4: bulk-compact particles at threshold
+    // bulk-compact particles at threshold
     if (this._deadParticles > 0 &&
         this._deadParticles / this.particles.length >= CONFIG.COMPACT_THRESHOLD_PARTICLES) {
       let write = 0;
@@ -2634,6 +2587,7 @@ class Game {
     if (this.boss) {
       this.boss.update(this._FIXED_STEP, this.player);
       if (!this.boss.isAlive) {
+        this.boss.alive = false;   // gate any same-tick collision checks
         this.spawnParticles(this.boss.x, this.boss.y, this.boss.color, 60);
         this.audio.playEnemyDeath();
         this.cameraShake = Math.max(this.cameraShake, CONFIG.SHAKE_MAX * 2);
@@ -2643,18 +2597,22 @@ class Game {
       }
     }
 
-    // Wave progression — C1: transition to WAVE_TRANSITION instead of instant spawn
+    // Wave progression
     if (this.enemies.length === 0 && !this.boss && this.kills >= this.wave
         && this.fsm.is(GameState.PLAYING)) {
       this.kills = 0;
-      this._waveTransitionTimer = 3.0;  // C1: 3-second inter-wave countdown
+      this._waveTransitionTimer = 3.0;  // 3-second inter-wave countdown
+      // Flag boss pre-warning when the NEXT wave (wave+1) is divisible by 5
+      this._bossWarning = (this.wave + 1) % 5 === 0;
       this.fsm.transition(GameState.WAVE_TRANSITION);
     }
 
-    // C2: update floating damage numbers
     for (let i = this.damageNumbers.length - 1; i >= 0; i--) {
       this.damageNumbers[i].update(dt);
-      if (this.damageNumbers[i].life <= 0) this.damageNumbers.splice(i, 1);
+      if (this.damageNumbers[i].life <= 0) {
+        DamageNumber.release(this.damageNumbers[i]);
+        this.damageNumbers.splice(i, 1);
+      }
     }
 
     if (this.cameraShake > 0) {
@@ -2670,7 +2628,7 @@ class Game {
 
   // ── Batched render pipeline ────────────────────────────────────────────────
 
-  // FIX 3: alpha parameter drives all entity lerp calls
+  // alpha parameter drives all entity lerp calls
   _draw(alpha) {
     const ctx = this.ctx;
 
@@ -2756,14 +2714,14 @@ class Game {
       }
     }
 
-    // ── Particles — FIX 3: pass alpha; FIX 4: draw() skips inactive ──────
+    // ── Particles ──────────────────────────────────────────────────────
     for (const p of this.particles) p.draw(ctx, alpha);
     ctx.globalAlpha = 1;
 
     // ── Bullet trails ─────────────────────────────────────────────────────
     this.trailMgr.draw(ctx);
 
-    // ── Bullets: glow layer — FIX 3: draw() lerps; FIX 4: skips inactive ─
+    // ── Bullets: glow layer ───────────────────────────────────────────────
     for (const b of this.bullets) {
       if (!b.active) continue;
       const rx   = Utils.lerp(b.prevX, b.x, alpha);
@@ -2807,7 +2765,7 @@ class Game {
       ctx.fillRect(rx - barW / 2, ry - e.size - barH - 6, barW * Utils.clamp(e.hp / e.maxHp, 0, 1), barH);
     }
 
-    // ── Player — FIX 1 + FIX 3 ───────────────────────────────────────────
+    // ── Player ─────────────────────────────────────────────────────────
     this.player.draw(ctx, this.input, alpha);
 
     ctx.restore();
@@ -2829,7 +2787,6 @@ class Game {
       this.damageFlash = Math.max(0, this.damageFlash - 1.8 / 60);
     }
 
-    // C1: WAVE_TRANSITION overlay — countdown text
     if (this.fsm.is(GameState.WAVE_TRANSITION)) {
       const countdown = Math.ceil(this._waveTransitionTimer);
       ctx.save();
@@ -2846,10 +2803,17 @@ class Game {
       ctx.fillStyle    = "rgba(255,255,255,0.7)";
       ctx.shadowBlur   = 0;
       ctx.fillText(String(countdown), this.width / 2, this.height / 2 + 20);
+      // Line 3: boss pre-warning
+      if (this._bossWarning) {
+        ctx.font        = `700 22px 'Rajdhani', sans-serif`;
+        ctx.fillStyle   = "#ff2d55";
+        ctx.shadowColor = "#ff2d55";
+        ctx.shadowBlur  = 12;
+        ctx.fillText("⚠ BOSS INCOMING", this.width / 2, this.height / 2 + 60);
+      }
       ctx.restore();
     }
 
-    // C2: floating damage numbers — drawn above everything including vignette
     if (this.damageNumbers && this.damageNumbers.length > 0) {
       for (const dn of this.damageNumbers) dn.draw(ctx);
     }
@@ -2858,7 +2822,7 @@ class Game {
   // ── Spawning helpers ───────────────────────────────────────────────────────
 
   /**
-   * FIX 11 — Wave Budget System.
+   * Wave Budget System.
    * Replaces the old random-float _spawnEnemy() call.
    *
    * Budget formula:  base 8 + wave * 3, capped at 60.
@@ -2874,7 +2838,7 @@ class Game {
     const _edgePos = () => {
       const side = Math.floor(Math.random() * 4);
       return {
-        // FIX 8: use width-1 / height-1 so enemies never spawn one pixel outside the canvas
+        // use width-1 / height-1 so enemies never spawn one pixel outside the canvas
         x: side === 0 ? 0 : side === 1 ? this.width  - 1 : Math.random() * this.width,
         y: side === 2 ? 0 : side === 3 ? this.height - 1 : Math.random() * this.height,
       };
@@ -2904,7 +2868,7 @@ class Game {
     this.walls   = [];
     this.crates  = [];   // indestructible static obstacles (crates & pillars)
 
-    // A6: player spawn is at (width/2, height/2); reject any placement within 90px
+    // player spawn is at (width/2, height/2); reject any placement within 90px
     const cx = this.width / 2;
     const cy = this.height / 2;
     const EXCLUSION = 90;
@@ -2927,7 +2891,7 @@ class Game {
         wy = Math.random() * (this.height - h - 40) + 20;
         attempts++;
       } while (_tooClose(wx, wy, w, h) && attempts < 20);
-      // FIX 3: generate hp first so maxHp can mirror it — HP bar starts full at spawn
+      // generate hp first so maxHp can mirror it — HP bar starts full at spawn
       const hp = Math.floor(Math.random() * 5) + 3;
       this.walls.push({ x: wx, y: wy, w, h, hp, maxHp: hp });
     }
@@ -2949,6 +2913,19 @@ class Game {
       } while (_tooClose(cx2, cy2, w, h) && attempts < 20);
       this.crates.push({ x: cx2, y: cy2, w, h, isPillar });
     }
+
+    // Build wallHash for broad-phase collision queries in checkWallCollision.
+    // Each rect is inserted as a pseudo-entity centred on its AABB midpoint
+    // with size = half-diagonal so the hash bucket covers the entire rect.
+    this._wallHash = new SpatialHash(120);
+    const _insertRect = (r) => {
+      const cx3 = r.x + r.w / 2;
+      const cy3 = r.y + r.h / 2;
+      const sz  = Math.sqrt(r.w * r.w + r.h * r.h) / 2;
+      this._wallHash.insert({ x: cx3, y: cy3, size: sz, _rect: r });
+    };
+    for (const w of this.walls)   _insertRect(w);
+    for (const c of this.crates)  _insertRect(c);
   }
 
   spawnParticles(x, y, color, count = 20) {
@@ -2962,7 +2939,7 @@ class Game {
       this.particles.push(p);
     }
 
-    // B2: Ring burst only for large explosions (count >= 15); skip for small hits like wall sparks
+    // Ring burst only for large explosions (count >= 15); skip for small hits like wall sparks
     if (count >= 15) {
       const shards = 12;
       for (let i = 0; i < shards; i++) {
@@ -2977,6 +2954,16 @@ class Game {
   }
 
   checkWallCollision(x, y, size) {
+    // Broad-phase via wallHash; falls back to full iteration if hash not ready.
+    if (this._wallHash) {
+      const candidates = this._wallHash.query(x, y, size + 80);
+      for (const proxy of candidates) {
+        const r = proxy._rect;
+        if (Utils.circleRect(x, y, size, r.x, r.y, r.w, r.h)) return r;
+      }
+      return null;
+    }
+    // Fallback (first frame before _spawnWalls runs)
     for (const w of this.walls) {
       if (Utils.circleRect(x, y, size, w.x, w.y, w.w, w.h)) return w;
     }
@@ -2989,6 +2976,7 @@ class Game {
   }
 
   _handleEnemyDeath(enemy, index) {
+    enemy.alive = false;   // gate all further collision/update checks this tick
     if (Math.random() < 0.2) {
       const type = CONFIG.POWERUP_TYPES[Math.floor(Math.random() * CONFIG.POWERUP_TYPES.length)];
       this.powerups.push({ x: enemy.x, y: enemy.y, type, size: 12 * this.uiScale, color: CONFIG.POWERUP_COLORS[type] });
@@ -2998,6 +2986,11 @@ class Game {
     this.spawnParticles(enemy.x, enemy.y, enemy.color, 22);
     this.audio.playEnemyDeath();
     Utils.removeFast(this.enemies, index);
+  }
+
+  triggerDamageFlash(intensity = 1.0) {
+    this.damageFlash  = Math.min(1, this.damageFlash + 0.35 * intensity);
+    this.cameraShake  = Math.max(this.cameraShake, CONFIG.SHAKE_MAX * 0.6 * intensity);
   }
 
   _applyPowerup(type) {
