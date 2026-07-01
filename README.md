@@ -23,11 +23,12 @@
 The engine is engineered for flawless high-Hz performance, implementing advanced game development patterns natively in JavaScript:
 
 * **Fixed-Step Physics with Temporal Interpolation:** The game loop uses an accumulator to decouple physics logic (fixed at 60Hz) from the render loop. Entities cache their previous positions, and rendering uses linear interpolation (`lerp`), eliminating micro-stutters and ensuring smooth movement on 120Hz/144Hz displays.
-* **Dead-Flag Object Pooling & Compaction:** Bullets and particles are managed via custom object pools to prevent garbage collection pauses. Instead of using expensive `Array.splice()`, dead entities are flagged and skipped during rendering. When dead slots exceed a 35% threshold, the array undergoes a lightning-fast bulk compaction.
-* **Spatial Hash Grid Collisions:** Swept-circle continuous collision detection (CCD) is optimized through a custom Spatial Hash Grid. This localizes collision checks, allowing for massive enemy swarms and bullet counts without tanking frame rates.
+* **Dead-Flag Object Pooling & Compaction:** Bullets, particles, and floating damage numbers are managed via custom object pools to prevent garbage collection pauses. Instead of using expensive `Array.splice()`, dead entities are flagged and skipped during rendering. When dead slots exceed a 35% threshold, the array undergoes a lightning-fast bulk compaction.
+* **Spatial Hash Grid Collisions:** Swept-circle continuous collision detection (CCD) is optimized through a custom Spatial Hash Grid. This includes a dedicated broad-phase `wallHash` for environment boundaries, allowing for massive enemy swarms and bullet counts without tanking frame rates.
 * **O(1) Circular Buffer Trails:** Entity neon trails are managed using a pre-allocated ring buffer with modulo indexing, replacing costly `Array.shift()` array copy operations with `O(1)` pointer advancements.
 * **LRU Glow Sprite Cache:** Canvas-drawn radial gradients (neon glows) are expensive. The `GlowCache` dynamically renders and caches sprites based on color and size, utilizing an auto-evicting 128-entry LRU (Least Recently Used) cache to prevent unbound memory growth.
-* **Finite State Machine (FSM):** Clean architectural transitions between `MENU`, `PLAYING`, `PAUSED`, `LEVEL_UP`, and `GAME_OVER` states.
+* **Finite State Machine (FSM):** Clean architectural transitions between `MENU`, `PLAYING`, `PAUSED`, `LEVEL_UP`, `WAVE_TRANSITION`, and `GAME_OVER` states.
+* **State & Concurrency Safety:** Entities like Enemies and Bosses utilize strict `alive` boolean flags to prevent simultaneous double-death triggers during concurrent collision and update loops.
 
 ---
 
@@ -38,6 +39,7 @@ Instead of random spawning, the game uses a **Threat Budget System**.
 * The budget increases dynamically: `Math.min(60, 8 + wave * 3)`.
 * Enemies have designated "costs" and "unlock waves".
 * The engine dynamically purchases enemies from the unlocked bestiary until the wave budget is exhausted, ensuring a balanced, escalating difficulty curve.
+* A dedicated Boss pre-warning indicator ("⚠ BOSS INCOMING") alerts players during the inter-wave countdown immediately preceding a boss wave.
 
 ### Line-of-Sight (LoS) AI & Flocking
 * Ranged enemies and Bosses utilize Liang–Barsky parametric clipping raycasts to check Line-of-Sight against the environment. They will hold their fire if a wall or crate is blocking the player.
@@ -46,6 +48,7 @@ Instead of random spawning, the game uses a **Threat Budget System**.
 ### Environment & Destructibility
 * **Destructible Walls:** Procedurally generated rectangular blocks with integrated HP bars that can be destroyed to open up the arena.
 * **Indestructible Crates & Pillars:** Solid metallic crates and glowing neon pillars provide permanent cover for LoS breaking.
+* **Combat Feedback:** Enemies dynamically display floating 4px inline health bars when damaged, providing clear combat feedback without cluttering the UI.
 
 ---
 
@@ -53,7 +56,7 @@ Instead of random spawning, the game uses a **Threat Budget System**.
 
 ### Weapons (Cycle with `E` / `Shift`)
 1. **Default Gun:** High fire-rate, reliable single-target damage.
-2. **Shotgun (Spread):** Fires a 5-pellet burst in a 40° cone. Perfect for close-quarters crowd control.
+2. **Shotgun (Spread):** Fires a dense 6-pellet burst in a 40° cone. Perfect for close-quarters crowd control. Total DPS output is mathematically balanced to match laser efficiency at mid-range (~1.9x base damage).
 3. **Piercing Laser:** Fires a high-velocity, high-damage cyan bolt that penetrates up to 4 enemies before dissipating.
 
 ### In-Run Leveling & Powerups
@@ -71,8 +74,8 @@ Enemies have a 20% chance to drop temporary timed buffs:
 ### 🪙 Persistent Meta-Progression (Local Storage)
 Coins are earned based on wave completion and survival time (`wave * 10 + floor(gameTime / 5)`). Visit the **Upgrade Depot** in the main menu to purchase permanent, multi-tiered upgrades that persist between sessions:
 * ⚡ Fire Rate (+5% per tier)
-* ❤ Max HP (+10 per tier)
-* 💥 Damage (+2 per tier)
+* ❤ Max HP (+25 per tier)
+* 💥 Damage (+5 per tier)
 * 🏃 Move Speed (+15 per tier)
 * 🚀 Bullet Speed (+40 per tier)
 
@@ -136,8 +139,11 @@ The `InputManager` supports simultaneous, sub-tick buffered inputs across all de
 * **Glassmorphism:** Overlays, menus, and the Shop utilize deep blur backdrops (`backdrop-filter: blur`) with glowing neon borders.
 * **Typography:** `Orbitron` is used for sharp, futuristic display headers, while `Rajdhani` provides highly legible HUD metrics.
 * **Dynamic HUD:** Real-time interpolated HP/XP bars, active buff timers, wave counters, and weapon state indicators.
-* **Responsive Scaling:** The entire canvas and UI dynamically scale (`--ui-scale` CSS variable) to maintain exact proportions from 4K monitors down to mobile screens.
-* **Local Leaderboard:** Saves top 10 unique scores directly to `localStorage`, ranked by Wave then Time.
+* **PWA Ready:** Implements `mobile-web-app-capable` and `apple-mobile-web-app-capable` meta tags alongside a locked viewport (`user-scalable=no`) to ensure a native, fullscreen app experience on mobile devices.
+* **Landscape Optimization:** Features a dedicated media query for landscape mobile devices, dynamically scaling the UI, repositioning virtual joysticks, and ensuring menus remain fully scrollable.
+* **Run Summary Stats:** The pause menu features a real-time statistical breakdown of the current run, tracking wave count, total kills, time elapsed, and weapon usage metrics.
+* **Strict CSS Tokenization:** Replaces hardcoded hex values with a unified set of custom properties (`var(--col-*)`) for seamless theming and rendering consistency.
+* **Local Leaderboard:** Saves top 10 unique scores securely to `localStorage`, entirely decoupled from remote backends for absolute privacy and offline play.
 
 ---
 
