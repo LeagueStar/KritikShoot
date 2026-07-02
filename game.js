@@ -105,10 +105,12 @@ const Utils = {
     const dx  = x1 - x0,  dy  = y1 - y0;
     const fx  = x0 - cx,  fy  = y0 - cy;
     const rSq = combinedR * combinedR;
+    const c0   = fx * fx + fy * fy - rSq;
+    if (c0 <= 0) return 0;   // already overlapping at t=0 — instant hit (point-blank/melee range)
     const a   = dx * dx + dy * dy;
     if (a < 1e-10) return -1;
     const b    = 2 * (fx * dx + fy * dy);
-    const c    = fx * fx + fy * fy - rSq;
+    const c    = c0;
     const disc = b * b - 4 * a * c;
     if (disc < 0) return -1;
     const t = (-b - Math.sqrt(disc)) / (2 * a);
@@ -161,15 +163,35 @@ const Utils = {
 // =============================================================================
 // SECTION 3 — SPATIAL HASH GRID
 // =============================================================================
+// NOTE: query() returns this._scratch, a single reusable array shared across
+// ALL calls on this instance — it is cleared and refilled on every query().
+// The array is invalidated the moment query() is called again, so callers
+// MUST fully consume the result (read every entry they need) before issuing
+// another query() on this same SpatialHash. Dedup of entities that straddle
+// multiple cells (and would otherwise appear more than once in the result)
+// is handled structurally via a per-query stamp written onto each entity —
+// callers no longer need their own Set-based dedup for this.
 class SpatialHash {
   constructor(cellSize = 80) {
-    this._cell = cellSize;
-    this._map  = new Map();
+    this._cell    = cellSize;
+    this._map     = new Map();
+    this._scratch = [];   // shared query result buffer — see class comment
+    this._stamp   = 0;    // incremented every query(); written onto entities to dedup
   }
 
   clear() { this._map.clear(); }
 
-  _key(gx, gy) { return `${gx},${gy}`; }  // string key avoids collision for large/negative coords
+  // Packed integer key instead of string concatenation — this runs on the
+  // hottest path in the file (every tick, every entity insert/query).
+  // Offset both axes by a large constant to keep them non-negative, then
+  // combine into a single integer. OFFSET (1e5) and MULT (2e5) are large
+  // enough that gx/gy can range roughly ±100000 grid cells (i.e. tens of
+  // millions of px at cellSize 80-120) before colliding — far beyond any
+  // realistic arena size — while still handling the negative-coordinate
+  // case the original string scheme was designed for.
+  _key(gx, gy) {
+    return (gx + 100000) * 200000 + (gy + 100000);
+  }
 
   insert(entity) {
     const r    = entity.size || 8;
@@ -191,11 +213,22 @@ class SpatialHash {
     const minY = Math.floor((y - r) / this._cell);
     const maxX = Math.floor((x + r) / this._cell);
     const maxY = Math.floor((y + r) / this._cell);
-    const out  = [];
+    const out  = this._scratch;
+    out.length = 0;
+    this._stamp++;
+    const stamp = this._stamp;
     for (let gx = minX; gx <= maxX; gx++) {
       for (let gy = minY; gy <= maxY; gy++) {
         const bucket = this._map.get(this._key(gx, gy));
-        if (bucket) for (const e of bucket) out.push(e);
+        if (bucket) {
+          for (const e of bucket) {
+            // an entity straddling a cell boundary appears in multiple buckets;
+            // the stamp ensures it's only pushed once per query() call
+            if (e._qStamp === stamp) continue;
+            e._qStamp = stamp;
+            out.push(e);
+          }
+        }
       }
     }
     return out;
@@ -244,13 +277,34 @@ class GameFSM {
 // SECTION 5 — OBJECT POOL
 // =============================================================================
 class ObjectPool {
-  constructor(FactoryClass, initialSize = 100) {
+  constructor(FactoryClass, initialSize = 100, maxSize = initialSize * 4) {
     this._factory = FactoryClass;
+    this._maxSize = maxSize;
     this._pool    = Array.from({ length: initialSize }, () => new FactoryClass());
+    for (const obj of this._pool) obj._pooled = true;
   }
 
-  get()        { return this._pool.length > 0 ? this._pool.pop() : new this._factory(); }
-  release(obj) { this._pool.push(obj); }
+  get() {
+    const obj = this._pool.length > 0 ? this._pool.pop() : new this._factory();
+    obj._pooled = false;
+    return obj;
+  }
+
+  release(obj) {
+    // guard against double-release: a double-released object could be handed
+    // out by two live get() calls simultaneously
+    if (obj._pooled) {
+      console.warn("ObjectPool.release() called on an already-released object; ignoring.");
+      return;
+    }
+    obj._pooled = true;
+    // beyond maxSize, drop the object for GC instead of retaining it forever —
+    // otherwise a large simultaneous burst (e.g. boss death) permanently
+    // grows the pool to its single largest historical peak.
+    if (this._pool.length >= this._maxSize) return;
+    this._pool.push(obj);
+  }
+
   get size()   { return this._pool.length; }
 }
 
@@ -265,7 +319,13 @@ const GlowCache = {
     pad = pad ?? radius * 1.5;
     const key = `${color}:${radius | 0}:${pad | 0}`;
     let   g   = this._map.get(key);
-    if (!g) {
+    if (g) {
+      // LRU: move this entry to the end of the Map's iteration order on hit,
+      // so a frequently-reused color doesn't get evicted ahead of a color
+      // that was only used once but more recently.
+      this._map.delete(key);
+      this._map.set(key, g);
+    } else {
       // evict the oldest entry when the cache exceeds 128 sprites
       if (this._map.size >= 128) {
         const oldestKey = this._map.keys().next().value;
@@ -533,6 +593,8 @@ class MetaProgression {
   // cost(tier): coins cost for that tier.
   // label: display name.
   // bonus(tiers): the flat additive bonus given the number of tiers owned.
+  // NOTE: UPGRADES stays static — it's an immutable readonly catalogue, not
+  // mutable state, so it's fine to share across instances.
   static UPGRADES = [
     {
       id:      "fireRate",
@@ -577,81 +639,83 @@ class MetaProgression {
     },
   ];
 
-  // ── Session cache (populated once per run by initSession()) ───────────────
-  static _cache = null;   // plain object mirror of ks_meta
-  static _coins = 0;      // integer mirror of ks_coins
+  constructor() {
+    // ── Session cache (populated once per run by initSession()) ─────────────
+    this._cache = null;   // plain object mirror of ks_meta
+    this._coins = 0;      // integer mirror of ks_coins
+
+    // instance Map built lazily on first getBonus()/purchase() call — O(1)
+    // lookup instead of UPGRADES.find() which is O(n) called every physics tick.
+    this._upgradeMap = null;
+  }
 
   /**
    * Call once at the start of every run (Game.start).
    * Reads localStorage into memory so Player getters never touch LS again.
    */
-  static initSession() {
+  initSession() {
     try {
-      MetaProgression._cache = JSON.parse(localStorage.getItem("ks_meta") || "{}");
+      this._cache = JSON.parse(localStorage.getItem("ks_meta") || "{}");
     } catch {
-      MetaProgression._cache = {};
+      this._cache = {};
     }
-    MetaProgression._coins = parseInt(localStorage.getItem("ks_coins") || "0", 10);
+    this._coins = parseInt(localStorage.getItem("ks_coins") || "0", 10);
   }
 
   /** Returns the in-memory cache object (never null after initSession). */
-  static load() {
-    return MetaProgression._cache ?? {};
+  load() {
+    return this._cache ?? {};
   }
 
   /** Writes data to both the in-memory cache and localStorage. */
-  static save(data) {
-    MetaProgression._cache = data;
+  save(data) {
+    this._cache = data;
     localStorage.setItem("ks_meta", JSON.stringify(data));
   }
 
-  static getCoins() {
-    return MetaProgression._coins;
+  getCoins() {
+    return this._coins;
   }
 
-  static setCoins(n) {
-    MetaProgression._coins = Math.max(0, n);
-    localStorage.setItem("ks_coins", String(MetaProgression._coins));
+  setCoins(n) {
+    this._coins = Math.max(0, n);
+    localStorage.setItem("ks_coins", String(this._coins));
   }
 
-  static awardCoins(wave, gameTime) {
+  awardCoins(wave, gameTime) {
     const earned = wave * 10 + Math.floor(gameTime / 5);
-    MetaProgression.setCoins(MetaProgression.getCoins() + earned);
+    this.setCoins(this.getCoins() + earned);
     return earned;
   }
 
-  // static Map built at class definition time — O(1) lookup in getBonus()
-  // instead of UPGRADES.find() which is O(n) called every physics tick.
-  static _upgradeMap = null;   // populated lazily after UPGRADES is defined
-
   // Returns the flat bonus value for a given upgrade id — reads from cache only
-  static getBonus(id) {
+  getBonus(id) {
     // build the map once on first call
-    if (!MetaProgression._upgradeMap) {
-      MetaProgression._upgradeMap = new Map(MetaProgression.UPGRADES.map(u => [u.id, u]));
+    if (!this._upgradeMap) {
+      this._upgradeMap = new Map(MetaProgression.UPGRADES.map(u => [u.id, u]));
     }
-    const cache = MetaProgression._cache ?? {};
+    const cache = this._cache ?? {};
     const tiers = cache[id] || 0;
-    const entry = MetaProgression._upgradeMap.get(id);
+    const entry = this._upgradeMap.get(id);
     return entry ? entry.bonus(tiers) : 0;
   }
 
   // Returns true if purchase succeeded; writes cache + localStorage once.
-  static purchase(id) {
-    if (!MetaProgression._upgradeMap) {
-      MetaProgression._upgradeMap = new Map(MetaProgression.UPGRADES.map(u => [u.id, u]));
+  purchase(id) {
+    if (!this._upgradeMap) {
+      this._upgradeMap = new Map(MetaProgression.UPGRADES.map(u => [u.id, u]));
     }
-    const entry = MetaProgression._upgradeMap.get(id);
+    const entry = this._upgradeMap.get(id);
     if (!entry) return false;
-    const data  = { ...MetaProgression.load() };   // shallow clone of cache
+    const data  = { ...this.load() };   // shallow clone of cache
     const tiers = data[id] || 0;
     if (tiers >= entry.maxTier) return false;
     const cost  = entry.cost(tiers);
-    const coins = MetaProgression.getCoins();
+    const coins = this.getCoins();
     if (coins < cost) return false;
-    MetaProgression.setCoins(coins - cost);
+    this.setCoins(coins - cost);
     data[id] = tiers + 1;
-    MetaProgression.save(data);   // updates cache + LS in one shot
+    this.save(data);   // updates cache + LS in one shot
     return true;
   }
 }
@@ -665,9 +729,10 @@ class MetaProgression {
 // =============================================================================
 class Bullet {
   constructor() {
-    this.active = false;
-    this.prevX  = 0;
-    this.prevY  = 0;
+    this.active  = false;
+    this.prevX   = 0;
+    this.prevY   = 0;
+    this._pooled = true;   // ObjectPool.get()/release() manage this flag
   }
 
   init(x, y, dx, dy, size, color, damage, isEnemy, piercing = false) {
@@ -710,9 +775,10 @@ class Bullet {
 // =============================================================================
 class Particle {
   constructor() {
-    this.active = false;
-    this.prevX  = 0;
-    this.prevY  = 0;
+    this.active  = false;
+    this.prevX   = 0;
+    this.prevY   = 0;
+    this._pooled = true;   // ObjectPool.get()/release() manage this flag
   }
 
   init(x, y, dx, dy, color, size, life) {
@@ -793,13 +859,13 @@ class Player {
     this._cachedAimAngle = 0;
   }
 
-  get maxHealth()  { return CONFIG.PLAYER_BASE_HEALTH + this.upgrades.health * 20    + MetaProgression.getBonus("health"); }
+  get maxHealth()  { return CONFIG.PLAYER_BASE_HEALTH + this.upgrades.health * 20    + this.game.meta.getBonus("health"); }
   // speed capped at 800 px/s so maxed meta + in-session upgrades can't break physics
-  get speed()      { return Math.min(800, CONFIG.PLAYER_BASE_SPEED + (this.upgrades.speed * 30) + (this.buffs.speedBoost > 0 ? 150 : 0) + MetaProgression.getBonus("speed")); }
-  get damage()     { return CONFIG.PLAYER_BASE_DAMAGE + (this.upgrades.damage * 2)   + MetaProgression.getBonus("damage"); }
+  get speed()      { return Math.min(800, CONFIG.PLAYER_BASE_SPEED + (this.upgrades.speed * 30) + (this.buffs.speedBoost > 0 ? 150 : 0) + this.game.meta.getBonus("speed")); }
+  get damage()     { return CONFIG.PLAYER_BASE_DAMAGE + (this.upgrades.damage * 2)   + this.game.meta.getBonus("damage"); }
   // shootDelay floor already present — Math.max(0.05) prevents fire-rate breaking the loop
-  get shootDelay() { return Math.max(0.05, CONFIG.PLAYER_SHOOT_DELAY - (this.upgrades.fireRate * 0.02) - MetaProgression.getBonus("fireRate")); }
-  get bulletSpd()  { return CONFIG.PLAYER_BULLET_SPEED + (this.upgrades.bulletSpeed * 30) + MetaProgression.getBonus("bulletSpeed"); }
+  get shootDelay() { return Math.max(0.05, CONFIG.PLAYER_SHOOT_DELAY - (this.upgrades.fireRate * 0.02) - this.game.meta.getBonus("fireRate")); }
+  get bulletSpd()  { return CONFIG.PLAYER_BULLET_SPEED + (this.upgrades.bulletSpeed * 30) + this.game.meta.getBonus("bulletSpeed"); }
   get critChance() { return this.upgrades.critChance * 0.05; }
   get lifesteal()  { return this.upgrades.lifesteal  * 0.05; }
 
@@ -1864,7 +1930,7 @@ class UIManager {
     this._renderLeaderboard();
 
     // Award coins based on run performance
-    const coinsEarned = MetaProgression.awardCoins(g.wave, g.gameTime);
+    const coinsEarned = g.meta.awardCoins(g.wave, g.gameTime);
     this._lastCoinsEarned = coinsEarned;
 
     const p = g.player;
@@ -1936,8 +2002,8 @@ class UIManager {
     if (!el) return;
 
     el.classList.remove("hidden");
-    const coins = MetaProgression.getCoins();
-    const data  = MetaProgression.load();
+    const coins = this.game.meta.getCoins();
+    const data  = this.game.meta.load();
 
     const rows = MetaProgression.UPGRADES.map(u => {
       const owned   = data[u.id] || 0;
@@ -1967,7 +2033,7 @@ class UIManager {
 
     el.querySelectorAll("button[data-upgrade]").forEach(btn => {
       btn.addEventListener("click", () => {
-        const success = MetaProgression.purchase(btn.dataset.upgrade);
+        const success = this.game.meta.purchase(btn.dataset.upgrade);
         if (success) this._renderCoinShop();
       });
     });
@@ -2178,6 +2244,7 @@ class Game {
 
     this.input = new InputManager(this);   // pass game so joystick auto-fire can check FSM state
     this.audio = new AudioEngine();        // FIX: must be created BEFORE UIManager so _bindUI() can safely read this.game.audio
+    this.meta  = new MetaProgression();    // FIX: must be created BEFORE UIManager — its constructor calls _renderCoinShop(), which reads this.game.meta
     this.ui    = new UIManager(this);
 
     this.bulletPool   = new ObjectPool(Bullet,   CONFIG.POOL_BULLETS);
@@ -2289,7 +2356,7 @@ class Game {
     this._deadParticles = 0;
 
     this.fsm.transition(GameState.PLAYING);
-    MetaProgression.initSession();   // snapshot LS once per run
+    this.meta.initSession();   // snapshot LS once per run
     this._spawnWalls();
     this._spawnWave();   // budget-based wave instead of N random enemies
 
@@ -2384,7 +2451,10 @@ class Game {
   // ── Fixed-step physics update ──────────────────────────────────────────────
 
   _update(dt) {
-    dt = Math.min(dt, 0.1);   // cap dt so paused/backgrounded tabs don't cause teleporting
+    // _update is only ever called from the fixed-step accumulator loop with
+    // this._FIXED_STEP, so dt should never vary — assert loudly if it does
+    // rather than silently clamping.
+    console.assert(dt === this._FIXED_STEP, "_update called with non-fixed dt:", dt);
     this.gameTime += dt;
 
     this.spatialHash.clear();
@@ -2456,15 +2526,12 @@ class Game {
         } else {
           const midX = (bx0 + b.x) * 0.5;
           const midY = (by0 + b.y) * 0.5;
+          // SpatialHash.query() now dedups boundary-straddling entities internally
+          // via its stamp mechanism, so no external Set-based dedup is needed here.
           const candidates = this.spatialHash.query(midX, midY, b.size + 60);
 
-          // reuse hoisted Set — clear() is O(n) on entries, not an allocation
-          this.collisionSeenSet.clear();
-
           for (const e of candidates) {
-            if (this.collisionSeenSet.has(e)) continue;
             if (!e.alive) continue;
-            this.collisionSeenSet.add(e);
             const t = Utils.sweepCircle(bx0, by0, b.x, b.y, e.x, e.y, b.size + e.size);
             if (t >= 0) {
               const isCrit  = Math.random() < this.player.critChance;
@@ -2592,7 +2659,7 @@ class Game {
         this.audio.playEnemyDeath();
         this.cameraShake = Math.max(this.cameraShake, CONFIG.SHAKE_MAX * 2);
         // Big coin bonus for killing the boss
-        MetaProgression.awardCoins(this.wave * 3, 0);
+        this.meta.awardCoins(this.wave * 3, 0);
         this.boss = null;
       }
     }
@@ -2643,19 +2710,23 @@ class Game {
       ctx.translate(ox, oy);
     }
 
-    // ── Walls ────────────────────────────────────────────────────────────
-    ctx.fillStyle = CONFIG.WALL_COLOR;
-    for (const w of this.walls) ctx.fillRect(w.x, w.y, w.w, w.h);
-
-    ctx.fillStyle = CONFIG.WALL_HP_COLOR;
-    for (const w of this.walls) ctx.fillRect(w.x, w.y - 9, w.w, 4);
-    ctx.fillStyle = CONFIG.WALL_HP_GOOD_COLOR;
+    // ── Walls (body → HP bg → HP fg, single pass per wall) ─────────────────
     for (const w of this.walls) {
+      ctx.fillStyle = CONFIG.WALL_COLOR;
+      ctx.fillRect(w.x, w.y, w.w, w.h);
+      ctx.fillStyle = CONFIG.WALL_HP_COLOR;
+      ctx.fillRect(w.x, w.y - 9, w.w, 4);
+      ctx.fillStyle = CONFIG.WALL_HP_GOOD_COLOR;
       ctx.fillRect(w.x, w.y - 9, w.w * Utils.clamp(w.hp / w.maxHp, 0, 1), 4);
     }
 
     // ── Crates & Pillars (indestructible environment) ─────────────────────
     if (this.crates) {
+      // shadowBlur is only toggled on state *transitions* (crate->pillar or
+      // pillar->crate) instead of unconditionally every pillar iteration —
+      // consecutive pillars now reuse the already-active shadow state.
+      // Guaranteed off before any crate draw, so visual output is unchanged.
+      let shadowActive = false;
       for (const c of this.crates) {
         if (c.isPillar) {
           // Pillar: dark core + bright neon outline
@@ -2663,14 +2734,17 @@ class Game {
           ctx.fillRect(c.x, c.y, c.w, c.h);
           ctx.strokeStyle = "rgba(0,229,255,0.55)";
           ctx.lineWidth   = 2;
-          ctx.shadowColor = "#00e5ff";
-          ctx.shadowBlur  = 8;
+          if (!shadowActive) {
+            ctx.shadowColor = "#00e5ff";
+            ctx.shadowBlur  = 8;
+            shadowActive = true;
+          }
           ctx.strokeRect(c.x + 1, c.y + 1, c.w - 2, c.h - 2);
-          ctx.shadowBlur  = 0;
           // Vertical light stripe
           ctx.fillStyle = "rgba(0,229,255,0.08)";
           ctx.fillRect(c.x + c.w * 0.35, c.y, c.w * 0.3, c.h);
         } else {
+          if (shadowActive) { ctx.shadowBlur = 0; shadowActive = false; }
           // Crate: warm steel box with rivets
           ctx.fillStyle = "#1c2535";
           ctx.fillRect(c.x, c.y, c.w, c.h);
@@ -2697,19 +2771,12 @@ class Game {
 
     // ── Powerups (batched by color) ───────────────────────────────────────
     if (this.powerups.length > 0) {
-      const pulse   = Math.sin(this.gameTime * 5) * 2;
-      const byColor = new Map();
+      const pulse = Math.sin(this.gameTime * 5) * 2;
       for (const pu of this.powerups) {
-        if (!byColor.has(pu.color)) byColor.set(pu.color, []);
-        byColor.get(pu.color).push(pu);
-      }
-      for (const [color, pus] of byColor) {
-        ctx.fillStyle = color;
+        ctx.fillStyle = pu.color;
         ctx.beginPath();
-        for (const pu of pus) {
-          ctx.moveTo(pu.x + pu.size + pulse, pu.y);
-          ctx.arc(pu.x, pu.y, pu.size + pulse, 0, Math.PI * 2);
-        }
+        ctx.moveTo(pu.x + pu.size + pulse, pu.y);
+        ctx.arc(pu.x, pu.y, pu.size + pulse, 0, Math.PI * 2);
         ctx.fill();
       }
     }
