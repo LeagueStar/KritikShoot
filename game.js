@@ -160,6 +160,26 @@ const Utils = {
 };
 
 
+// Best-effort landscape lock for touch devices, called from a click handler
+// so it runs inside a user-gesture (both Fullscreen and Orientation Lock
+// require one). Neither API is universal — iOS Safari supports neither, so
+// the CSS .rotate-prompt overlay is the real cross-platform fallback and
+// this is purely a nicety on browsers that do support it (mainly Chrome/
+// Android). Failures are swallowed on purpose: there's nothing useful to
+// show the player if the browser declines.
+function attemptLandscapeLock() {
+  if (!navigator.maxTouchPoints) return;
+  const el = document.documentElement;
+  const requestFs = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (requestFs) {
+    requestFs.call(el).catch(() => {});
+  }
+  if (screen.orientation && screen.orientation.lock) {
+    screen.orientation.lock("landscape").catch(() => {});
+  }
+}
+
+
 // =============================================================================
 // SECTION 3 — SPATIAL HASH GRID
 // =============================================================================
@@ -438,12 +458,14 @@ class AudioEngine {
 
   // Shared envelope helper — connects osc → gain → dest, schedules stop
   _play(setupFn, duration = 0.25) {
+    if (this.muted) return;   // FIX(bug1): no sound at all while muted
     try {
       const ctx  = this._getCtx();
       const gain = ctx.createGain();
       gain.connect(ctx.destination);
       const node = setupFn(ctx, gain);
-      gain.gain.setValueAtTime(0, ctx.currentTime + duration);
+      // FIX(bug7): ramp to zero instead of an instant jump, to avoid a click
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + duration + 0.02);
       // disconnect the gain node once the source finishes to prevent GainNode leaks
       if (node && typeof node.addEventListener === "function") {
         node.addEventListener("ended", () => gain.disconnect(), { once: true });
@@ -670,7 +692,8 @@ class MetaProgression {
   /** Writes data to both the in-memory cache and localStorage. */
   save(data) {
     this._cache = data;
-    localStorage.setItem("ks_meta", JSON.stringify(data));
+    // FIX(bug5): guard against quota errors / Safari private-mode throws
+    try { localStorage.setItem("ks_meta", JSON.stringify(data)); } catch { /* in-memory cache still updated */ }
   }
 
   getCoins() {
@@ -679,7 +702,8 @@ class MetaProgression {
 
   setCoins(n) {
     this._coins = Math.max(0, n);
-    localStorage.setItem("ks_coins", String(this._coins));
+    // FIX(bug5): guard against quota errors / Safari private-mode throws
+    try { localStorage.setItem("ks_coins", String(this._coins)); } catch { /* in-memory value still updated */ }
   }
 
   awardCoins(wave, gameTime) {
@@ -1842,11 +1866,13 @@ class UIManager {
         const nicknameInput = document.getElementById("nicknameInput");
         const raw  = nicknameInput ? nicknameInput.value.trim() : "";
         const name = raw.length > 0 ? raw : "Ghost";
-        localStorage.setItem("ks_nickname", name);
+        // FIX(bug5): guard against quota errors / Safari private-mode throws
+        try { localStorage.setItem("ks_nickname", name); } catch { /* falls back to "Ghost" next read */ }
         this._el.startScreen.classList.add("hidden");
         this._el.coinShop?.classList.add("hidden");
         if (this._shouldShowMobileUI()) {
           this._el.mobileUI.classList.add("mobile-ui--active");
+          attemptLandscapeLock();
         }
         this.game.start();
       });
@@ -1860,6 +1886,7 @@ class UIManager {
         this._el.coinShop?.classList.add("hidden");
         if (this._shouldShowMobileUI()) {
           this._el.mobileUI.classList.add("mobile-ui--active");
+          attemptLandscapeLock();
         }
         this.game.start();
       });
@@ -1910,28 +1937,68 @@ class UIManager {
     this._el.levelUp.classList.remove("hidden");
   }
 
+  // FIX(design2): shared by showGameOver() and quitToMenu() so both save the
+  // leaderboard entry and award coins the exact same way — no duplicated logic.
+  _finalizeRun() {
+    const g    = this.game;
+    const name = localStorage.getItem("ks_nickname") || "Ghost";
+    this._saveScore(name, g.wave, g.gameTime, g.player.stats.level);
+    this._renderLeaderboard();
+    const coinsEarned = g.meta.awardCoins(g.wave, g.gameTime);
+    this._lastCoinsEarned = coinsEarned;
+    return coinsEarned;
+  }
+
+  // FIX(design2): quitting now preserves progress — awards coins and saves the
+  // leaderboard entry via the same _finalizeRun() logic showGameOver() uses —
+  // but stays a clean early exit: no full game-over/run-summary panel, just a
+  // brief toast ("+N coins earned, returning to menu") before the menu shows.
   quitToMenu() {
-    cancelAnimationFrame(this.game._rafId);
+    const g = this.game;
+    cancelAnimationFrame(g._rafId);
+
+    // Only bank progress if a run was actually in flight (player exists).
+    let coinsEarned = 0;
+    if (g.player) coinsEarned = this._finalizeRun();
+
     this.game.fsm.transition(GameState.MENU);
     this._el.gameOverActions.classList.add("hidden");
     this._el.levelUp.classList.add("hidden");
     this._el.mobileUI.classList.remove("mobile-ui--active");
+    this._el.mobileUI.classList.remove("paused");
     const qb = document.getElementById("quitBtn");
     if (qb) qb.classList.add("hidden");
     this._renderLeaderboard();
     this._renderCoinShop();
     this._el.startScreen.classList.remove("hidden");
+
+    if (coinsEarned > 0) this._showQuitToast(`+${coinsEarned} coins earned — returning to menu`);
+  }
+
+  // Lightweight, self-dismissing toast for the quit-with-progress flow.
+  // Reuses a single DOM node so rapid quit/restart cycles don't leak elements.
+  _showQuitToast(message) {
+    let toast = document.getElementById("quitToast");
+    if (!toast) {
+      toast = document.createElement("div");
+      toast.id = "quitToast";
+      toast.className = "quit-toast";
+      document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    // restart the fade animation even if a toast is already showing
+    toast.classList.remove("quit-toast--show");
+    void toast.offsetWidth;   // force reflow so the class re-add re-triggers CSS animation
+    toast.classList.add("quit-toast--show");
+    clearTimeout(this._quitToastTimer);
+    this._quitToastTimer = setTimeout(() => {
+      toast.classList.remove("quit-toast--show");
+    }, 2600);
   }
 
   showGameOver() {
-    const g    = this.game;
-    const name = localStorage.getItem("ks_nickname") || "Ghost";
-    this._saveScore(name, g.wave, g.gameTime, g.player.stats.level);
-    this._renderLeaderboard();
-
-    // Award coins based on run performance
-    const coinsEarned = g.meta.awardCoins(g.wave, g.gameTime);
-    this._lastCoinsEarned = coinsEarned;
+    const g = this.game;
+    const coinsEarned = this._finalizeRun();
 
     const p = g.player;
     const mostUsedWeapon = Object.entries(p.weaponShots)
@@ -1977,7 +2044,9 @@ class UIManager {
       seen.add(key);
       return true;
     }).slice(0, 10);
-    localStorage.setItem("ks_scores", JSON.stringify(this._scores));
+    // FIX(bug5): guard against quota errors / Safari private-mode throws — a
+    // failed write here must not stop the rest of the game-over/quit sequence
+    try { localStorage.setItem("ks_scores", JSON.stringify(this._scores)); } catch { /* in-memory list still updated */ }
   }
 
   _renderLeaderboard() {
@@ -2087,14 +2156,10 @@ class UIManager {
     ctx.fillStyle = "rgba(0,229,255,0.8)";
     ctx.fillText(`XP  ${p.stats.xp} / ${p.stats.xpToNext}`, m, xbY + xbH + 4);
 
-    // Weapon mode indicator
-    const weaponLabel = { default: "GUN", spread: "SHOTGUN", laser: "LASER" }[p.weapon] || p.weapon.toUpperCase();
-    const weaponColor = p.weapon === "laser" ? "#00e5ff" : p.weapon === "spread" ? "#ff9f43" : "#e8f0fe";
-    ctx.font      = `700 ${Math.max(11, 13 * s)}px ${CONFIG.HUD_FONT}`;
-    ctx.fillStyle = weaponColor;
-    ctx.fillText(`⚔ ${weaponLabel}  [E/SHIFT]`, m, xbY + xbH + 4 + 22 * s);
-
-    let buffY = xbY + xbH + 28 * s;
+    // FIX(design3): the on-canvas weapon label duplicated the dedicated
+    // weaponBtn's textContent — the DOM button is now the single source of
+    // truth for "current weapon", so this HUD line is removed.
+    let buffY = xbY + xbH + 22 * s;
     for (const key in p.buffs) {
       if (p.buffs[key] > 0) {
         ctx.font      = `700 ${Math.max(11, 13 * s)}px ${CONFIG.HUD_FONT}`;
@@ -2280,6 +2345,19 @@ class Game {
         this.fsm.transition(GameState.PAUSED);
       }
     });
+
+    // auto-pause when a touch device is rotated into portrait — the
+    // .rotate-prompt overlay (CSS) covers the screen at the same time,
+    // so this just stops the sim from advancing underneath it.
+    const portraitQuery = window.matchMedia("(orientation: portrait) and (hover: none) and (pointer: coarse)");
+    const onPortraitChange = mq => {
+      if (mq.matches && this.fsm.is(GameState.PLAYING)) {
+        this.fsm.transition(GameState.PAUSED);
+      }
+    };
+    portraitQuery.addEventListener
+      ? portraitQuery.addEventListener("change", onPortraitChange)
+      : portraitQuery.addListener(onPortraitChange); // Safari < 14 fallback
   }
 
   _wireFSM() {
@@ -2291,10 +2369,14 @@ class Game {
         enter: () => {
           const btn = document.getElementById("quitBtn");
           if (btn) btn.classList.remove("hidden");
+          // FIX(design3): fade out the joystick/FIRE/weapon buttons — they do
+          // nothing while paused — so only resume-relevant controls stand out.
+          this.ui._el.mobileUI.classList.add("paused");
         },
         exit: () => {
           const btn = document.getElementById("quitBtn");
           if (btn) btn.classList.add("hidden");
+          this.ui._el.mobileUI.classList.remove("paused");
           this.lastTime = performance.now();
         },
       })
@@ -2433,10 +2515,15 @@ class Game {
 
     // weapon cycle on E or Shift — Tab hijacks browser focus, Q is quit
     // also handle _weaponPressed from mobile weapon button
-    if ((this.input.keys["e"] || this.input.keys["shift"] || this.input._weaponPressed) && state === GameState.PLAYING) {
-      this.input.keys["e"]       = false;
-      this.input.keys["shift"]   = false;
-      this.input._weaponPressed  = false;
+    // FIX(bug3): flags are consumed/cleared on this frame regardless of state,
+    // so a press registered while PAUSED/LEVEL_UP/GAME_OVER can't silently
+    // trigger a weapon cycle the instant play resumes.
+    const weaponSwitchRequested =
+      this.input.keys["e"] || this.input.keys["shift"] || this.input._weaponPressed;
+    this.input.keys["e"]      = false;
+    this.input.keys["shift"]  = false;
+    this.input._weaponPressed = false;
+    if (weaponSwitchRequested && state === GameState.PLAYING) {
       const modes = ["default", "spread", "laser"];
       const idx   = modes.indexOf(this.player.weapon);
       this.player.weapon = modes[(idx + 1) % modes.length];
