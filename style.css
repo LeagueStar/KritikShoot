@@ -666,6 +666,17 @@ button:active {
   background: rgba(255, 45, 85, 0.3);
 }
 
+/* FIX(design3): while paused, the joystick/FIRE/weapon buttons do nothing —
+   fade them out (but keep them non-interactive rather than display:none, so
+   there's no layout jump) so only resume-relevant controls stand out. */
+.mobile-ui.paused .joystick,
+.mobile-ui.paused .btn--shoot,
+.mobile-ui.paused .btn--weapon {
+  opacity: 0.25;
+  pointer-events: none;
+  transition: opacity var(--dur-fast);
+}
+
 
 /* ─────────────────────────────────────────────────────────────
    12. RESPONSIVE BREAKPOINTS
@@ -718,15 +729,24 @@ button:active {
     right: 16px;
   }
 
-  .btn--weapon {
-    bottom: 16px;
-    right: calc(70px + 24px + 16px);
-    left: auto;
-    transform: none;
-  }
-
   .btn--pause {
     top: 10px;
+    right: 10px;
+    width: 44px;
+    height: 44px;
+  }
+
+  /* FIX(bug4): keep weapon button clear of the canvas HUD text and the
+     pause button at the small-landscape-mobile breakpoint too */
+  .btn--weapon {
+    top: 10px;
+    right: 62px;
+    width: 58px;
+    height: 44px;
+  }
+
+  .btn--quit {
+    top: 62px;
     right: 10px;
     width: 44px;
     height: 44px;
@@ -736,6 +756,53 @@ button:active {
   .screen__inner {
     overflow-y: auto;
     max-height: 100vh;
+  }
+}
+
+
+/* ─────────────────────────────────────────────────────────────
+   12b. ROTATE-TO-LANDSCAPE PROMPT
+   Hidden by default / on desktop. Shown only for touch devices
+   held in portrait, where it fully covers the canvas + UI so the
+   player can't act on a layout that isn't meant for portrait.
+   game.js pauses the sim while this is visible.
+   ───────────────────────────────────────────────────────────── */
+.rotate-prompt {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  background: rgba(5, 8, 22, 0.97);
+  text-align: center;
+  padding: var(--space-lg);
+}
+
+.rotate-prompt__icon {
+  font-size: 3rem;
+  color: var(--col-primary);
+  animation: rotate-prompt-spin 1.6s ease-in-out infinite;
+}
+
+.rotate-prompt__text {
+  font-family: var(--font-display, 'Rajdhani', sans-serif);
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+  color: var(--col-text);
+  max-width: 26ch;
+}
+
+@keyframes rotate-prompt-spin {
+  0%, 100% { transform: rotate(0deg); }
+  50%      { transform: rotate(-90deg); }
+}
+
+@media (orientation: portrait) and (hover: none) and (pointer: coarse) {
+  .rotate-prompt {
+    display: flex;
   }
 }
 
@@ -888,15 +955,19 @@ button:active {
 
 
 /* ─────────────────────────────────────────────────────────────
-   C3. WEAPON SWITCH BUTTON — bottom-center mobile UI
+   C3. WEAPON SWITCH BUTTON — top-right mobile UI
+   FIX(bug4/design1): was pinned to top-left (20px/20px), the exact
+   corner drawHUD() uses for the "WAVE / KILLS / ENEMIES" line
+   (m = 20 * uiScale), so it visually collided with the canvas HUD.
+   Moved to the top-right cluster, to the left of the pause button,
+   so it never overlaps canvas-drawn text at any uiScale/viewport.
    ───────────────────────────────────────────────────────────── */
 .btn--weapon {
   position: absolute;
-  bottom: calc(170px * var(--ui-scale));
-  left: 50%;
-  transform: translateX(-50%);
-  width: calc(68px * var(--ui-scale));
-  height: calc(34px * var(--ui-scale));
+  top: calc(20px * var(--ui-scale));
+  right: calc(84px * var(--ui-scale));
+  width: calc(72px * var(--ui-scale));
+  height: calc(52px * var(--ui-scale));
   border-radius: var(--radius-sm);
   background: rgba(0, 229, 255, 0.08);
   border: 1px solid rgba(0, 229, 255, 0.35);
@@ -910,7 +981,7 @@ button:active {
   backdrop-filter: blur(6px);
   box-shadow: var(--glow-primary);
   pointer-events: auto;
-  transition: background var(--dur-fast);
+  transition: background var(--dur-fast), opacity var(--dur-fast);
 }
 
 .btn--weapon:active {
@@ -958,4 +1029,37 @@ button:active {
   font-weight: 700;
   color: var(--col-primary);
   letter-spacing: 1px;
+}
+
+
+/* ─────────────────────────────────────────────────────────────
+   C6. QUIT TOAST — FIX(design2): lightweight confirmation shown
+   when quitting mid-run with progress banked ("+N coins earned").
+   Single reused node, appended to <body> by UIManager._showQuitToast().
+   ───────────────────────────────────────────────────────────── */
+.quit-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 48px;
+  transform: translate(-50%, 12px);
+  background: rgba(5, 8, 22, 0.92);
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  border-radius: 10px;
+  padding: 0.65rem 1.1rem;
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.03em;
+  color: #feca57;
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.12);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 200;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.quit-toast--show {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
