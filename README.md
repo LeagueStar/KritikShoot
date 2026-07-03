@@ -29,6 +29,7 @@ The engine is engineered for flawless high-Hz performance, implementing advanced
 * **LRU Glow Sprite Cache:** Canvas-drawn radial gradients (neon glows) are expensive. The `GlowCache` dynamically renders and caches sprites based on color and size, utilizing an auto-evicting 128-entry LRU (Least Recently Used) cache to prevent unbound memory growth.
 * **Finite State Machine (FSM):** Clean architectural transitions between `MENU`, `PLAYING`, `PAUSED`, `LEVEL_UP`, `WAVE_TRANSITION`, and `GAME_OVER` states.
 * **State & Concurrency Safety:** Entities like Enemies and Bosses utilize strict `alive` boolean flags to prevent simultaneous double-death triggers during concurrent collision and update loops.
+* **Fault-Tolerant Storage:** All `localStorage` interactions are guarded by `try/catch` blocks.[cite: 1] This ensures the game will not crash if browser storage quotas are exceeded or if strict privacy modes block local storage access.[cite: 1]
 
 ---
 
@@ -112,13 +113,14 @@ Every 5th wave halts standard spawning and summons a **Boss**.
 * **Crunch (Death):** Band-pass filtered noise burst.
 * **Laser:** Sawtooth wave with rapid frequency modulation.
 * **Thwump (Spread):** Two slightly detuned triangle/sine oscillators creating a chunky shotgun feel.
+* **Audio Engine Polish:** The engine utilizes `linearRampToValueAtTime` for volume decay, effectively eliminating harsh audio clicking or popping artifacts.[cite: 1] The audio system also features a fully functional mute toggle that safely bypasses oscillator generation.[cite: 1]
 * *Note: The engine includes automated `GainNode` garbage collection via `onended` hooks to prevent memory leaks.*
 
 ---
 
 ## ⌨️ Controls & Input Management
 
-The `InputManager` supports simultaneous, sub-tick buffered inputs across all device types.
+The `InputManager` supports simultaneous, sub-tick buffered inputs across all device types. State-safe input flags are unconditionally read and cleared every frame.[cite: 1] This logic prevents stale inputs (like weapon cycling) from silently triggering when returning from paused or leveling states.[cite: 1]
 
 ### Desktop
 * **Move:** `W`, `A`, `S`, `D` or `Arrow Keys`
@@ -138,10 +140,13 @@ The `InputManager` supports simultaneous, sub-tick buffered inputs across all de
 
 * **Glassmorphism:** Overlays, menus, and the Shop utilize deep blur backdrops (`backdrop-filter: blur`) with glowing neon borders.
 * **Typography:** `Orbitron` is used for sharp, futuristic display headers, while `Rajdhani` provides highly legible HUD metrics.
-* **Dynamic HUD:** Real-time interpolated HP/XP bars, active buff timers, wave counters, and weapon state indicators.
-* **PWA Ready:** Implements `mobile-web-app-capable` and `apple-mobile-web-app-capable` meta tags alongside a locked viewport (`user-scalable=no`) to ensure a native, fullscreen app experience on mobile devices.
-* **Landscape Optimization:** Features a dedicated media query for landscape mobile devices, dynamically scaling the UI, repositioning virtual joysticks, and ensuring menus remain fully scrollable.
+* **Dynamic HUD:** Real-time interpolated HP/XP bars, active buff timers, and wave counters are featured on the canvas.[cite: 1] The redundant on-canvas weapon text was removed to maintain the DOM button as the single source of truth for the current weapon.[cite: 1]
+* **PWA Ready:** Implements `mobile-web-app-capable` and `apple-mobile-web-app-capable` meta tags.[cite: 2] To improve accessibility, the viewport permits pinch-zooming up to a 3.0 scale (`maximum-scale=3.0`) without breaking the core fixed-canvas layout.[cite: 2]
+* **Landscape Optimization:** Features a dedicated media query for landscape mobile devices, dynamically scaling the UI, repositioning virtual joysticks, and ensuring menus remain fully scrollable. 
+* **Ergonomic Positioning:** The mobile weapon switch button is situated in the top-right cluster to eliminate visual overlap with the canvas-drawn HUD statistics.[cite: 3]
+* **Smart Overlay States:** Non-interactive mobile controls, such as the joystick and fire buttons, elegantly fade out when the game is paused to emphasize the active menu UI.[cite: 1, 3]
 * **Run Summary Stats:** The pause menu features a real-time statistical breakdown of the current run, tracking wave count, total kills, time elapsed, and weapon usage metrics.
+* **Quit-With-Progress:** Quitting a session mid-run securely banks earned coins and preserves leaderboard data.[cite: 1] This action triggers a lightweight, self-dismissing CSS-animated toast notification to confirm the save without requiring an intrusive modal.[cite: 1, 3]
 * **Strict CSS Tokenization:** Replaces hardcoded hex values with a unified set of custom properties (`var(--col-*)`) for seamless theming and rendering consistency.
 * **Local Leaderboard:** Saves top 10 unique scores securely to `localStorage`, entirely decoupled from remote backends for absolute privacy and offline play.
 
