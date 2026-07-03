@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <!-- FIX(bug6): allow pinch-zoom up to 3x instead of blocking it entirely,
+       without changing the fixed-canvas mobile layout (canvas is sized in JS,
+       not by viewport scale) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -43,6 +46,12 @@
   </div>
 
   <canvas id="gameCanvas" tabindex="0" aria-label="Game Canvas"></canvas>
+
+  <!-- Shown on touch devices held in portrait; blocks play until rotated -->
+  <div id="rotatePrompt" class="rotate-prompt" role="alert" aria-live="assertive">
+    <div class="rotate-prompt__icon" aria-hidden="true">⟳</div>
+    <p class="rotate-prompt__text">Rotate your device to landscape to play</p>
+  </div>
 
   <div id="mobileControls" class="mobile-ui" aria-hidden="true">
     <div id="joystick" class="joystick" role="presentation">
