@@ -46,7 +46,7 @@ const CONFIG = Object.freeze({
     rage:         "#ff4757",
   },
 
-  HUD_FONT:             "'Rajdhani', monospace",
+  HUD_FONT:             "'Rajdhani', sans-serif",
   HUD_COLOR_MAIN:       "#e8f0fe",
   HUD_COLOR_HP_BG:      "rgba(255, 45, 85, 0.35)",
   HUD_COLOR_HP_FG:      "#2ecc71",
@@ -1800,6 +1800,14 @@ class InputManager {
       });
       weaponBtn.addEventListener("click", () => { this._weaponPressed = true; });
     }
+
+    // C3-PC: desktop weapon-switch button forwards through the same
+    // _weaponPressed flag as the mobile button — one code path in
+    // _handleInputEvents() does the actual cycling either way.
+    const weaponBtnPC = document.getElementById("weaponBtnPC");
+    if (weaponBtnPC) {
+      weaponBtnPC.addEventListener("click", () => { this._weaponPressed = true; });
+    }
   }
 
   // store a normalised [-1,1] unit vector scaled by deflection ratio.
@@ -2126,7 +2134,13 @@ class UIManager {
     ctx.fillStyle = CONFIG.HUD_COLOR_MAIN;
     const bossLabel = g.boss ? "  ☠ BOSS WAVE" : "";
     ctx.fillStyle = g.boss ? "#ff2d55" : CONFIG.HUD_COLOR_MAIN;
-    ctx.fillText(`WAVE ${g.wave}${bossLabel}   KILLS ${g.kills}/${g.wave}   ENEMIES ${g.enemies.length}`, m, m);
+    // FIX(bug7): "KILLS x/y" is meaningless on boss waves (this.kills only
+    // tracks regular-enemy deaths, and a boss wave has none) — show the
+    // boss's remaining HP as the wave-clear condition instead.
+    const progressLabel = g.boss
+      ? `BOSS HP ${Math.max(0, Math.ceil(g.boss.hp))}/${g.boss.maxHp}`
+      : `KILLS ${g.kills}/${g.wave}   ENEMIES ${g.enemies.length}`;
+    ctx.fillText(`WAVE ${g.wave}${bossLabel}   ${progressLabel}`, m, m);
 
     ctx.font      = `600 ${Math.max(12, 14 * s)}px ${CONFIG.HUD_FONT}`;
     ctx.fillStyle = "rgba(232,240,254,0.7)";
@@ -2372,11 +2386,15 @@ class Game {
           // FIX(design3): fade out the joystick/FIRE/weapon buttons — they do
           // nothing while paused — so only resume-relevant controls stand out.
           this.ui._el.mobileUI.classList.add("paused");
+          // C3-PC: desktop weapon button lives outside #mobileControls, so
+          // it needs its own pause-dim toggle alongside the mobile one.
+          document.getElementById("weaponBtnPC")?.classList.add("is-disabled");
         },
         exit: () => {
           const btn = document.getElementById("quitBtn");
           if (btn) btn.classList.add("hidden");
           this.ui._el.mobileUI.classList.remove("paused");
+          document.getElementById("weaponBtnPC")?.classList.remove("is-disabled");
           this.lastTime = performance.now();
         },
       })
@@ -2422,6 +2440,10 @@ class Game {
     this.crates    = [];
     this.powerups  = [];
     this.boss      = null;    // Boss instance, or null when not active
+    // FIX(bug7): tracks whether the CURRENT wave is a boss wave, so wave-
+    // progression logic can branch cleanly instead of relying on `this.kills`
+    // (which boss waves never increment via _handleEnemyDeath).
+    this._isBossWave = false;
 
     this.wave      = 1;
     this.kills     = 0;
@@ -2448,6 +2470,8 @@ class Game {
 
     const weaponBtn = document.getElementById("weaponBtn");
     if (weaponBtn) weaponBtn.textContent = "GUN";
+    const weaponBtnPCInit = document.getElementById("weaponBtnPC");
+    if (weaponBtnPCInit) weaponBtnPCInit.textContent = "GUN";
 
     this._rafId = requestAnimationFrame(ts => this._loop(ts));
   }
@@ -2476,7 +2500,8 @@ class Game {
         // Timer expired — increment wave, spawn, resume play
         this.wave++;
         this.cameraShake = Math.max(this.cameraShake, CONFIG.SHAKE_MAX);
-        if (this.wave % 5 === 0) {
+        this._isBossWave = (this.wave % 5 === 0);   // FIX(bug7): recorded per-wave
+        if (this._isBossWave) {
           this.boss = new Boss(this);
           this._bossWarning = false;   // clear warning now that boss has spawned
         } else {
@@ -2527,11 +2552,15 @@ class Game {
       const modes = ["default", "spread", "laser"];
       const idx   = modes.indexOf(this.player.weapon);
       this.player.weapon = modes[(idx + 1) % modes.length];
+      const labels = { default: "GUN", spread: "SHOT", laser: "LASER" };
+      const label  = labels[this.player.weapon] || "GUN";
+      // weaponBtn.textContent remains the single source of truth for the
+      // current weapon label; weaponBtnPC (desktop) just mirrors it so the
+      // two on-screen controls never disagree.
       const weaponBtn = document.getElementById("weaponBtn");
-      if (weaponBtn) {
-        const labels = { default: "GUN", spread: "SHOT", laser: "LASER" };
-        weaponBtn.textContent = labels[this.player.weapon] || "GUN";
-      }
+      if (weaponBtn) weaponBtn.textContent = label;
+      const weaponBtnPC = document.getElementById("weaponBtnPC");
+      if (weaponBtnPC) weaponBtnPC.textContent = label;
     }
   }
 
@@ -2747,13 +2776,29 @@ class Game {
         this.cameraShake = Math.max(this.cameraShake, CONFIG.SHAKE_MAX * 2);
         // Big coin bonus for killing the boss
         this.meta.awardCoins(this.wave * 3, 0);
+        // FIX(bug7 review): normal enemy deaths award XP via _handleEnemyDeath
+        // (this.kills++ + player.addXP()) but the boss-death branch previously
+        // awarded neither — same "boss wave forgot a normal-wave-only counter"
+        // pattern as the softlock bug below, just for XP instead of wave
+        // progression. Award a lump XP bonus scaled with wave, consistent
+        // with the boss's outsized coin bonus.
+        this.player.addXP(50 + this.wave * 5);
         this.boss = null;
       }
     }
 
     // Wave progression
-    if (this.enemies.length === 0 && !this.boss && this.kills >= this.wave
-        && this.fsm.is(GameState.PLAYING)) {
+    // FIX(bug7): boss waves never spawn normal enemies, so this.kills is
+    // never incremented on boss waves (only _handleEnemyDeath does that,
+    // and it's only called for regular enemies) — the old condition
+    // `this.kills >= this.wave` could never become true on a boss wave,
+    // permanently softlocking the game after every boss kill. Boss waves
+    // now complete purely on the boss dying; normal waves keep the
+    // enemies-cleared + kills-quota condition.
+    const waveCleared = this._isBossWave
+      ? !this.boss
+      : (this.enemies.length === 0 && this.kills >= this.wave);
+    if (waveCleared && this.fsm.is(GameState.PLAYING)) {
       this.kills = 0;
       this._waveTransitionTimer = 3.0;  // 3-second inter-wave countdown
       // Flag boss pre-warning when the NEXT wave (wave+1) is divisible by 5
