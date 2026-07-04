@@ -64,6 +64,14 @@
     <button id="quitBtn"  class="btn btn--quit hidden" aria-label="Quit to Menu">⌂</button>
   </div>
 
+  <!-- C3-PC: desktop-only weapon-switch control. #weaponBtn (above, inside
+       #mobileControls) remains the single source of truth for the weapon
+       label/state — this button just mirrors its textContent and forwards
+       clicks through the same InputManager flag. style.css shows it only
+       under (hover:hover) and (pointer:fine), so it never appears on touch
+       devices and #mobileControls / mobile behavior is untouched. -->
+  <button id="weaponBtnPC" class="btn btn--weapon-pc" aria-label="Switch Weapon (E)">GUN</button>
+
   <div
     id="levelUpScreen"
     class="screen screen--overlay glass-panel hidden"
