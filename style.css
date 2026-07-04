@@ -666,6 +666,24 @@ button:active {
   background: rgba(255, 45, 85, 0.3);
 }
 
+/* Hover states for the touch-first control buttons — guarded so a real
+   mouse (hybrid touch+mouse devices) gets a hover cue, while touchscreens
+   never trigger a "stuck hover" after tapping. */
+@media (hover: hover) and (pointer: fine) {
+  .btn--shoot:hover {
+    background: rgba(255, 45, 85, 0.22);
+    box-shadow: var(--glow-accent), 0 0 28px rgba(255, 45, 85, 0.35);
+  }
+
+  .btn--pause:hover {
+    background: rgba(0, 229, 255, 0.18);
+  }
+
+  .btn--quit:hover {
+    background: rgba(255, 45, 85, 0.18);
+  }
+}
+
 /* FIX(design3): while paused, the joystick/FIRE/weapon buttons do nothing —
    fade them out (but keep them non-interactive rather than display:none, so
    there's no layout jump) so only resume-relevant controls stand out. */
@@ -788,7 +806,7 @@ button:active {
 }
 
 .rotate-prompt__text {
-  font-family: var(--font-display, 'Rajdhani', sans-serif);
+  font-family: var(--font-ui);
   font-size: 1rem;
   letter-spacing: 0.04em;
   color: var(--col-text);
@@ -851,7 +869,7 @@ button:active {
 }
 
 .shop-title {
-  font-family: 'Orbitron', monospace;
+  font-family: var(--font-display);
   font-size: 0.75rem;
   font-weight: 700;
   color: var(--col-primary);
@@ -859,7 +877,7 @@ button:active {
 }
 
 .shop-coins {
-  font-family: 'Rajdhani', monospace;
+  font-family: var(--font-ui);
   font-size: 0.95rem;
   font-weight: 700;
   color: #feca57;
@@ -884,20 +902,20 @@ button:active {
 }
 
 .shop-label {
-  font-family: 'Rajdhani', monospace;
+  font-family: var(--font-ui);
   font-size: 0.9rem;
   font-weight: 700;
   color: var(--col-text);
 }
 
 .shop-desc {
-  font-family: 'Rajdhani', monospace;
+  font-family: var(--font-ui);
   font-size: 0.72rem;
   color: rgba(232,240,254,0.45);
 }
 
 .btn--shop {
-  font-family: 'Rajdhani', monospace;
+  font-family: var(--font-ui);
   font-size: 0.82rem;
   font-weight: 700;
   padding: 0.3rem 0.7rem;
@@ -915,7 +933,7 @@ button:active {
 
 /* Coin award notice on game over */
 .game-over-coins {
-  font-family: 'Rajdhani', monospace;
+  font-family: var(--font-ui);
   font-size: 1.1rem;
   font-weight: 700;
   color: #feca57;
@@ -988,6 +1006,63 @@ button:active {
   background: rgba(0, 229, 255, 0.28);
 }
 
+/* Dimmed while PAUSED — mirrors the old `.mobile-ui.paused .btn--weapon`
+   rule, applied directly since weaponBtn/weaponBtnPC are no longer both
+   guaranteed to be descendants of `.mobile-ui` (see C3-PC below). */
+.btn--weapon.is-disabled,
+.btn--weapon-pc.is-disabled {
+  opacity: 0.25;
+  pointer-events: none;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   C3-PC. DESKTOP WEAPON-SWITCH BUTTON
+   Lives outside #mobileControls so it is never subject to that
+   panel's touch-only "mobile-ui--active" activation. Visibility is
+   handled purely by media query (hover:hover + pointer:fine == a
+   real mouse), so touch devices never see or receive this element —
+   #mobileControls and its own #weaponBtn are completely untouched.
+   Positioned top-right to match the mobile weapon button's spot,
+   clear of the canvas-drawn WAVE/KILLS HUD line (top-left).
+   ───────────────────────────────────────────────────────────── */
+.btn--weapon-pc {
+  display: none;
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 50;
+  width: 84px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 229, 255, 0.08);
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  color: var(--col-primary);
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  letter-spacing: 1px;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(6px);
+  box-shadow: var(--glow-primary);
+  pointer-events: auto;
+  transition: background var(--dur-fast), box-shadow var(--dur-fast), opacity var(--dur-fast);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn--weapon-pc {
+    display: flex;
+  }
+}
+
+.btn--weapon-pc:hover {
+  background: rgba(0, 229, 255, 0.2);
+  box-shadow: var(--glow-primary), 0 0 24px rgba(0, 229, 255, 0.35);
+}
+
+.btn--weapon-pc:active {
+  background: rgba(0, 229, 255, 0.32);
+}
+
 
 /* ─────────────────────────────────────────────────────────────
    C4. RUN SUMMARY — injected into #gameOverActions on game over
@@ -1009,7 +1084,7 @@ button:active {
   align-items: center;
   padding: 0.2rem 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  font-family: 'Rajdhani', sans-serif;
+  font-family: var(--font-ui);
 }
 
 .run-summary__row:last-child {
@@ -1046,7 +1121,7 @@ button:active {
   border: 1px solid rgba(0, 229, 255, 0.35);
   border-radius: 10px;
   padding: 0.65rem 1.1rem;
-  font-family: 'Rajdhani', sans-serif;
+  font-family: var(--font-ui);
   font-weight: 700;
   font-size: 0.95rem;
   letter-spacing: 0.03em;
