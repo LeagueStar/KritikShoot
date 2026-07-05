@@ -677,11 +677,21 @@ class MetaProgression {
    */
   initSession() {
     try {
-      this._cache = JSON.parse(localStorage.getItem("ks_meta") || "{}");
+      const parsed = JSON.parse(localStorage.getItem("ks_meta") || "{}");
+      // FIX(bug10): a manually-edited/corrupted key, or one written by a
+      // future/older schema, could parse to a non-object (array, number,
+      // string, null) — every getBonus()/purchase() call assumes an object
+      // with numeric tier fields, so fall back to a fresh cache instead.
+      this._cache = (parsed && typeof parsed === "object" && !Array.isArray(parsed)) ? parsed : {};
     } catch {
       this._cache = {};
     }
-    this._coins = parseInt(localStorage.getItem("ks_coins") || "0", 10);
+    // FIX(bug10): parseInt on a corrupted/non-numeric value (or a stray
+    // empty string) yields NaN, which then poisons every future coin total
+    // permanently — Math.max(0, NaN) is NaN, so setCoins()/awardCoins() can
+    // never recover once this happens. Guard against NaN explicitly.
+    const rawCoins = parseInt(localStorage.getItem("ks_coins") || "0", 10);
+    this._coins = Number.isFinite(rawCoins) ? Math.max(0, rawCoins) : 0;
   }
 
   /** Returns the in-memory cache object (never null after initSession). */
@@ -701,7 +711,10 @@ class MetaProgression {
   }
 
   setCoins(n) {
-    this._coins = Math.max(0, n);
+    // FIX(bug10): belt-and-suspenders — never let a NaN slip into _coins
+    // from here either, so one bad caller can't permanently poison the
+    // in-memory total for the rest of the session.
+    this._coins = Number.isFinite(n) ? Math.max(0, n) : this._coins;
     // FIX(bug5): guard against quota errors / Safari private-mode throws
     try { localStorage.setItem("ks_coins", String(this._coins)); } catch { /* in-memory value still updated */ }
   }
@@ -1648,7 +1661,23 @@ class InputManager {
     this._pausePressed  = false;
     this._quitPressed   = false;
     this._weaponPressed = false;   // mobile weapon switch button
+
+    // FIX(bug9): isShooting used to be a single flag stomped on directly by
+    // four independent input sources (mouse, the canvas aim-touch zone, the
+    // FIRE button, and joystick auto-fire). Releasing ANY one of them set
+    // isShooting = false outright, even while another source was still held
+    // — e.g. releasing the FIRE button while an aim-touch was still down
+    // silently stopped fire. Each source now only owns its own flag, and
+    // isShooting is derived as the OR of all of them via _updateShootState().
+    this._shootSources = { mouse: false, aimTouch: false, fireBtn: false, joystick: false };
+
     this._bindListeners();
+  }
+
+  // FIX(bug9): recompute the public isShooting flag from all active sources.
+  _updateShootState() {
+    const s = this._shootSources;
+    this.isShooting = s.mouse || s.aimTouch || s.fireBtn || s.joystick;
   }
 
   // Re-evaluates on every read so rotating a tablet or resizing a window
@@ -1672,10 +1701,14 @@ class InputManager {
       this.mouseY = e.clientY - rect.top;
     });
     window.addEventListener("mousedown", () => {
-      this.isShooting  = true;
+      this._shootSources.mouse = true;   // FIX(bug9)
+      this._updateShootState();
       this._shootBuffer = true;   // latch so the next eligible tick fires
     });
-    window.addEventListener("mouseup",   () => { this.isShooting = false; });
+    window.addEventListener("mouseup",   () => {
+      this._shootSources.mouse = false;  // FIX(bug9)
+      this._updateShootState();
+    });
 
     // ── Touch IDs — track left (joystick) vs right (aim) independently ────────
     let jBaseX = 0, jBaseY = 0;
@@ -1693,7 +1726,8 @@ class InputManager {
           _aimTouchId      = t.identifier;
           this.mouseX      = t.clientX - rect.left;
           this.mouseY      = t.clientY - rect.top;
-          this.isShooting  = true;
+          this._shootSources.aimTouch = true;   // FIX(bug9)
+          this._updateShootState();
           this._shootBuffer = true;   // latch on touch too
         }
       }
@@ -1713,8 +1747,9 @@ class InputManager {
     canvas.addEventListener("touchend", e => {
       for (const t of e.changedTouches) {
         if (t.identifier === _aimTouchId) {
-          _aimTouchId     = null;
-          this.isShooting = false;
+          _aimTouchId = null;
+          this._shootSources.aimTouch = false;  // FIX(bug9)
+          this._updateShootState();
         }
       }
     });
@@ -1751,7 +1786,10 @@ class InputManager {
           this.joystickActive = false;
           this.joystickX      = 0;
           this.joystickY      = 0;
-          if (_aimTouchId === null) this.isShooting = false;
+          // FIX(bug9): only clear this source's own flag — other still-held
+          // shoot sources (aim-touch, FIRE button, mouse) keep firing.
+          this._shootSources.joystick = false;
+          this._updateShootState();
           if (knob) knob.style.transform = "translate(-50%, -50%)";
           if (joy) joy.classList.remove("joystick--active");
         }
@@ -1764,20 +1802,31 @@ class InputManager {
       _origUpdateJoy(touch, bx, by, k);
       // joystickX/Y are now [-1,1]; threshold 0.2 avoids firing in dead-zone
       const moving = Math.hypot(this.joystickX, this.joystickY) > 0.2;
-      // only set isShooting when actually PLAYING — prevents auto-fire during PAUSED/LEVEL_UP
-      if (moving && this._game && this._game.fsm.is(GameState.PLAYING)) {
-        this.isShooting  = true;
-        this._shootBuffer = true;
-      }
+      // only fire when actually PLAYING — prevents auto-fire during PAUSED/LEVEL_UP
+      const shouldFire = moving && this._game && this._game.fsm.is(GameState.PLAYING);
+      // FIX(bug9): drive this from the joystick's own shoot-source flag
+      // (instead of stomping this.isShooting directly) so it composes
+      // correctly with other held shoot sources. This also fixes a related
+      // issue: previously auto-fire, once started, never turned back off
+      // when the stick was pulled back into the dead-zone while still
+      // held — only a full release did. Now it tracks `shouldFire` live.
+      this._shootSources.joystick = shouldFire;
+      this._updateShootState();
+      if (shouldFire) this._shootBuffer = true;
     };
 
     if (shootBtn) {
       shootBtn.addEventListener("touchstart", e => {
         e.preventDefault();
-        this.isShooting  = true;
+        this._shootSources.fireBtn = true;   // FIX(bug9)
+        this._updateShootState();
         this._shootBuffer = true;
       });
-      shootBtn.addEventListener("touchend",   e => { e.preventDefault(); this.isShooting = false; });
+      shootBtn.addEventListener("touchend", e => {
+        e.preventDefault();
+        this._shootSources.fireBtn = false;  // FIX(bug9)
+        this._updateShootState();
+      });
     }
 
     const pauseBtn = document.getElementById("pauseBtn");
@@ -1839,7 +1888,11 @@ class UIManager {
     // load scores once at construction — _saveScore and _renderLeaderboard
     // read/write this._scores in memory; localStorage is only touched on mutation.
     try {
-      this._scores = JSON.parse(localStorage.getItem("ks_scores") || "[]");
+      const parsedScores = JSON.parse(localStorage.getItem("ks_scores") || "[]");
+      // FIX(bug10): _saveScore()/_renderLeaderboard() call array methods
+      // (sort/filter/map) on this unconditionally — a corrupted or
+      // non-array value here would throw the first time either runs.
+      this._scores = Array.isArray(parsedScores) ? parsedScores : [];
     } catch {
       this._scores = [];
     }
@@ -2399,7 +2452,22 @@ class Game {
         },
       })
       .register(GameState.GAME_OVER, {
-        enter: () => { this.ui.showGameOver(); },
+        // FIX(bug11): PAUSED fades out the joystick/FIRE/weapon buttons
+        // because they do nothing while paused — GAME_OVER never got the
+        // same treatment, so those controls stayed at full opacity and
+        // pointer-events:auto, looking fully interactive on the game-over
+        // screen even though touching them has no effect. Reuse the same
+        // dimming class PAUSED uses, and clear it on exit (covers both the
+        // "restart" and "menu" paths, since both go through fsm.transition).
+        enter: () => {
+          this.ui.showGameOver();
+          this.ui._el.mobileUI.classList.add("paused");
+          document.getElementById("weaponBtnPC")?.classList.add("is-disabled");
+        },
+        exit: () => {
+          this.ui._el.mobileUI.classList.remove("paused");
+          document.getElementById("weaponBtnPC")?.classList.remove("is-disabled");
+        },
       })
       .register(GameState.WAVE_TRANSITION, {
         // No enter/exit side-effects needed; timer is polled in _loop
@@ -2573,6 +2641,12 @@ class Game {
     console.assert(dt === this._FIXED_STEP, "_update called with non-fixed dt:", dt);
     this.gameTime += dt;
 
+    // FIX(bug12): this Set's own class-level comment says it's "cleared each
+    // tick, never newed" but nothing actually called .clear() on it — it
+    // silently retained a reference to every Boss instance ever fought for
+    // the rest of the session (a small but permanent per-run memory leak).
+    this.collisionSeenSet.clear();
+
     this.spatialHash.clear();
     for (const e of this.enemies) this.spatialHash.insert(e);
 
@@ -2669,7 +2743,26 @@ class Game {
               }
               // O(1) index lookup via pre-built map
               const ei = enemyIndexMap.get(e);
-              if (e.hp <= 0 && ei !== undefined) this._handleEnemyDeath(e, ei);
+              if (e.hp <= 0 && ei !== undefined) {
+                // FIX(bug8): enemyIndexMap was built once before the bullets
+                // loop, but _handleEnemyDeath() below does a swap-and-pop on
+                // this.enemies — the enemy that was previously last in the
+                // array is moved into slot `ei`. If a *second* bullet in this
+                // same loop later kills that moved enemy, the map still held
+                // its OLD (now stale) index. Calling removeFast() with that
+                // stale index either no-ops on an out-of-bounds slot (leaving
+                // a "dead" enemy — alive=false but never spliced out — stuck
+                // in this.enemies forever, so enemies.length never reaches 0
+                // and the wave can never clear) or, worse, evicts a totally
+                // unrelated, still-alive enemy from the array. Patch the map
+                // in lockstep with the swap so every later lookup this tick
+                // stays correct.
+                const lastIdx    = this.enemies.length - 1;
+                const movedEnemy = this.enemies[lastIdx];
+                this._handleEnemyDeath(e, ei);
+                enemyIndexMap.delete(e);
+                if (movedEnemy !== e) enemyIndexMap.set(movedEnemy, ei);
+              }
               if (hit) break;  // stop scanning once this bullet is spent
             }
           }
