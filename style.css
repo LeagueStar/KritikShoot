@@ -775,6 +775,16 @@ button:active {
     overflow-y: auto;
     max-height: 100vh;
   }
+
+  /* FIX(instructions1): give the how-to-play content more room on short
+     landscape viewports, matching the .screen__inner treatment above. */
+  .howto-inner {
+    max-height: 96vh;
+  }
+
+  .howto-content {
+    max-height: 70vh;
+  }
 }
 
 
@@ -969,6 +979,109 @@ button:active {
 
 .btn--mute:hover {
   background: rgba(0, 229, 255, 0.22);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   C6. HOW-TO-PLAY BUTTON — reuses .btn--mute's circle styling;
+   only the horizontal offset changes so it sits just to the left
+   of #muteBtn instead of overlapping it. See index.html for markup.
+   ───────────────────────────────────────────────────────────── */
+.btn--howto {
+  right: calc(66px * var(--ui-scale));
+}
+
+
+/* ─────────────────────────────────────────────────────────────
+   C7. HOW-TO-PLAY MODAL
+   FIX(instructions1): built on top of .screen / .screen--overlay /
+   .glass-panel (same overlay + scale-in transition #levelUpScreen
+   already uses) — only the classes below are new.
+   ───────────────────────────────────────────────────────────── */
+.howto-inner {
+  position: relative;
+  max-height: 82vh;
+}
+
+.btn--close {
+  position: absolute;
+  top: calc(4px * var(--ui-scale));
+  right: calc(4px * var(--ui-scale));
+  width: calc(30px * var(--ui-scale));
+  height: calc(30px * var(--ui-scale));
+  border-radius: 50%;
+  background: rgba(255, 45, 85, 0.1);
+  border: 1px solid rgba(255, 45, 85, 0.4);
+  color: var(--col-accent);
+  font-size: calc(0.85rem * var(--ui-scale));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.btn--close:hover {
+  background: var(--col-accent);
+  color: #fff;
+}
+
+.howto-content {
+  width: 100%;
+  max-height: 56vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--col-primary) transparent;
+}
+
+.howto-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.howto-content::-webkit-scrollbar-thumb {
+  background: var(--col-primary);
+  border-radius: var(--radius-pill);
+}
+
+.howto-heading {
+  font-family: var(--font-display);
+  font-size: calc(0.8rem * var(--ui-scale));
+  color: var(--col-primary);
+  letter-spacing: 2px;
+  margin-bottom: var(--space-xs);
+}
+
+.howto-text {
+  font-size: calc(0.85rem * var(--ui-scale));
+  color: var(--col-text-muted);
+  line-height: 1.5;
+}
+
+.howto-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.howto-list li {
+  font-size: calc(0.85rem * var(--ui-scale));
+  color: var(--col-text-muted);
+  line-height: 1.4;
+}
+
+.howto-key {
+  display: inline-block;
+  font-family: var(--font-display);
+  font-size: 0.68rem;
+  color: var(--col-primary);
+  background: rgba(0, 229, 255, 0.1);
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  margin-right: 2px;
 }
 
 
