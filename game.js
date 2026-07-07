@@ -1904,6 +1904,7 @@ class UIManager {
       mobileUI:        document.getElementById("mobileControls"),
       leaderboard:     document.getElementById("localLeaderboard"),
       coinShop:        document.getElementById("coinShop"),
+      instructions:    document.getElementById("instructionsScreen"), // FIX(instructions1)
     };
 
     this._bindUI();
@@ -1920,6 +1921,58 @@ class UIManager {
         muteBtn.textContent = this.game.audio.muted ? "🔇" : "🔊";
       });
     }
+
+    // FIX(instructions1): "How to Play" modal. Reuses the exact same
+    // classList.add/remove("hidden") pattern already used for
+    // levelUpScreen / coinShop below — no new show/hide plumbing.
+    // Which control-scheme section is shown is decided by
+    // _shouldShowMobileUI(), the same check startBtn/restartBtn already
+    // use to toggle #mobileControls, rather than adding a second
+    // touch/device detection method.
+    const howToBtn     = document.getElementById("howToPlayBtn");
+    const instrPanel   = this._el.instructions;
+    const instrClose   = document.getElementById("instructionsCloseBtn");
+    const instrDesktop = document.getElementById("howtoControlsDesktop");
+    const instrMobile  = document.getElementById("howtoControlsMobile");
+
+    const openInstructions = () => {
+      if (!instrPanel) return;
+      const mobile = this._shouldShowMobileUI();
+      instrDesktop?.classList.toggle("hidden", mobile);
+      instrMobile?.classList.toggle("hidden", !mobile);
+      instrPanel.classList.remove("hidden");
+    };
+
+    const closeInstructions = () => {
+      instrPanel?.classList.add("hidden");
+    };
+
+    if (howToBtn) howToBtn.addEventListener("click", openInstructions);
+    if (instrClose) instrClose.addEventListener("click", closeInstructions);
+
+    // Clicking the dimmed backdrop (i.e. anywhere that isn't the inner
+    // card) closes the panel, same "click outside" convention used for
+    // other overlay dismissals in this codebase.
+    if (instrPanel) {
+      instrPanel.addEventListener("click", e => {
+        if (e.target === instrPanel) closeInstructions();
+      });
+    }
+
+    // FIX(instructions2): dedicated Escape handler for this modal. It's
+    // intentionally separate from InputManager's keys["escape"] latch
+    // (which drives in-game pause and is only read while
+    // fsm.is(GameState.PLAYING)) — the how-to-play modal is only
+    // reachable from the start screen, before the game loop is running,
+    // so the two Escape paths never compete in the same frame. Opening
+    // and closing this panel never touches game state (fsm, player,
+    // audio, etc.), so it's safe to return to the start screen exactly
+    // as it was.
+    window.addEventListener("keydown", e => {
+      if (e.key === "Escape" && instrPanel && !instrPanel.classList.contains("hidden")) {
+        closeInstructions();
+      }
+    });
 
     const startBtn = document.getElementById("startBtn");
     if (startBtn) {
