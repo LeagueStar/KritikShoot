@@ -20,6 +20,12 @@
     <div class="screen__inner">
       <!-- C5: mute toggle button — top-right inside the start screen panel -->
       <button id="muteBtn" class="btn btn--mute" aria-label="Toggle Sound">🔊</button>
+      <!-- FIX(instructions1): "How to Play" button — sits directly to the
+           left of #muteBtn using the same .btn--mute circle styling, with
+           .btn--howto only overriding the horizontal offset so the two
+           buttons form a top-right cluster without disturbing the rest of
+           the start-screen layout. -->
+      <button id="howToPlayBtn" class="btn btn--mute btn--howto" aria-label="How to Play">?</button>
       <div class="logo-lockup">
         <span class="logo-sub">— SURVIVAL SHOOTER —</span>
         <h1 class="logo-title">KritikShoot</h1>
@@ -90,6 +96,79 @@
         <button class="btn btn--upgrade" data-type="bulletSpeed" role="listitem">🚀 Bullet Speed</button>
         <button class="btn btn--upgrade" data-type="critChance"  role="listitem">🎯 Crit Chance</button>
         <button class="btn btn--upgrade" data-type="lifesteal"   role="listitem">🩸 Lifesteal</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FIX(instructions1): "How to Play" modal — reuses the exact same
+       .screen + .screen--overlay + .glass-panel + hidden-class pattern as
+       #levelUpScreen above, so it gets the same show/hide transition and
+       backdrop for free with no new CSS states. Both control-scheme
+       sections are always in the DOM; game.js shows only the relevant one
+       by toggling the shared global .hidden class, based on the existing
+       _shouldShowMobileUI() device check (no second detection method
+       added). -->
+  <div
+    id="instructionsScreen"
+    class="screen screen--overlay glass-panel hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-label="How to Play"
+  >
+    <div class="screen__inner screen__inner--compact howto-inner">
+      <button id="instructionsCloseBtn" class="btn btn--close" aria-label="Close">✕</button>
+      <h2 class="screen__title">HOW TO PLAY</h2>
+
+      <div class="howto-content">
+        <section class="howto-section">
+          <h3 class="howto-heading">Objective</h3>
+          <p class="howto-text">
+            Survive the waves. Kill enemies to earn XP and level up, dodge the
+            bosses that show up every few waves, and grab dropped coins —
+            they carry over between runs and can be spent in the shop.
+          </p>
+        </section>
+
+        <section id="howtoControlsDesktop" class="howto-section">
+          <h3 class="howto-heading">Desktop Controls</h3>
+          <ul class="howto-list">
+            <li><span class="howto-key">WASD</span> / <span class="howto-key">Arrows</span> — Move</li>
+            <li><span class="howto-key">Mouse</span> — Aim</li>
+            <li><span class="howto-key">Click</span> (hold to keep firing) — Shoot</li>
+            <li><span class="howto-key">E</span> / <span class="howto-key">Shift</span> — Switch weapon</li>
+            <li><span class="howto-key">Esc</span> — Pause</li>
+            <li><span class="howto-key">Q</span> — Quit to menu (while paused)</li>
+          </ul>
+        </section>
+
+        <section id="howtoControlsMobile" class="howto-section">
+          <h3 class="howto-heading">Mobile Controls</h3>
+          <ul class="howto-list">
+            <li><span class="howto-key">Joystick</span> (left side) — Move</li>
+            <li><span class="howto-key">Drag</span> (right side) — Aim</li>
+            <li><span class="howto-key">FIRE</span> button — Shoot</li>
+            <li><span class="howto-key">Weapon</span> button — Cycle weapon</li>
+            <li><span class="howto-key">⏸</span> — Pause</li>
+            <li><span class="howto-key">⌂</span> — Quit to menu (while paused)</li>
+          </ul>
+        </section>
+
+        <section class="howto-section">
+          <h3 class="howto-heading">Weapons</h3>
+          <p class="howto-text">
+            Cycle through three weapons: <strong>GUN</strong> → <strong>SHOTGUN</strong> → <strong>LASER</strong>,
+            each with its own spread, damage, and fire rate.
+          </p>
+        </section>
+
+        <section class="howto-section">
+          <h3 class="howto-heading">Upgrades</h3>
+          <p class="howto-text">
+            Leveling up lets you pick one upgrade: Move Speed, Max Health, Damage,
+            Fire Rate, Bullet Speed, Crit Chance, or Lifesteal. Coins collected in
+            a run also unlock permanent upgrades in the persistent shop between runs.
+          </p>
+        </section>
       </div>
     </div>
   </div>
