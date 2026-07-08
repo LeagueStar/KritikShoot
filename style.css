@@ -1251,3 +1251,16 @@ button:active {
   opacity: 1;
   transform: translate(-50%, 0);
 }
+
+/* FIX(polish2): prefers-reduced-motion — stop purely decorative infinite
+   animations (logo flicker, spinning icons) and shorten UI transitions.
+   Camera shake / damage-flash dampening for canvas rendering is handled in
+   game.js (Game._reducedMotion), since those are drawn on <canvas>, not CSS. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
