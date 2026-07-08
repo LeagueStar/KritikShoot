@@ -5,6 +5,9 @@
 
 "use strict";
 
+// FIX(polish1): single switch for dev-only diagnostics (console.assert, etc.)
+// so production play doesn't pay for a per-physics-tick assertion.
+const DEBUG = false;
 
 // =============================================================================
 // SECTION 1 — CONFIGURATION
@@ -690,7 +693,12 @@ class MetaProgression {
     // empty string) yields NaN, which then poisons every future coin total
     // permanently — Math.max(0, NaN) is NaN, so setCoins()/awardCoins() can
     // never recover once this happens. Guard against NaN explicitly.
-    const rawCoins = parseInt(localStorage.getItem("ks_coins") || "0", 10);
+    // FIX(audit1): this localStorage.getItem() call sat outside the try/catch
+    // above — in environments where storage access itself throws (Safari
+    // private-mode edge cases, storage disabled by policy, etc.) this would
+    // throw out of initSession() uncaught, breaking Game.start() entirely.
+    let rawCoins = 0;
+    try { rawCoins = parseInt(localStorage.getItem("ks_coins") || "0", 10); } catch { rawCoins = 0; }
     this._coins = Number.isFinite(rawCoins) ? Math.max(0, rawCoins) : 0;
   }
 
@@ -1258,7 +1266,7 @@ class Enemy {
           player.health -= this.damage * 2 * falloff;
           this.game.triggerDamageFlash(1.5);
           this.game.audio.playPlayerHit();
-          this.game.cameraShake = Math.max(this.game.cameraShake, CONFIG.SHAKE_MAX * 1.5);
+          this.game._addShake(CONFIG.SHAKE_MAX * 1.5);
           if (player.health <= 0) { player.alive = false; player.health = 0; }
         }
         return;
@@ -2055,7 +2063,10 @@ class UIManager {
   // leaderboard entry and award coins the exact same way — no duplicated logic.
   _finalizeRun() {
     const g    = this.game;
-    const name = localStorage.getItem("ks_nickname") || "Ghost";
+    // FIX(audit1): unguarded localStorage.getItem() — see the matching fix
+    // in MetaProgression.initSession() for why this needs a try/catch too.
+    let name = "Ghost";
+    try { name = localStorage.getItem("ks_nickname") || "Ghost"; } catch { name = "Ghost"; }
     this._saveScore(name, g.wave, g.gameTime, g.player.stats.level);
     this._renderLeaderboard();
     const coinsEarned = g.meta.awardCoins(g.wave, g.gameTime);
@@ -2446,6 +2457,15 @@ class Game {
     this._shakeTime  = 0;
     this._rafId      = null;
 
+    // FIX(polish2): respect prefers-reduced-motion — dampen (not eliminate,
+    // so damage is still legible) camera shake and the damage-flash vignette.
+    const reduceMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    this._reducedMotion = reduceMotionQuery.matches;
+    const onReducedMotionChange = mq => { this._reducedMotion = mq.matches; };
+    reduceMotionQuery.addEventListener
+      ? reduceMotionQuery.addEventListener("change", onReducedMotionChange)
+      : reduceMotionQuery.addListener(onReducedMotionChange); // Safari < 14 fallback
+
     this._FIXED_STEP  = 1 / 60;
     this._accumulator = 0;
 
@@ -2589,10 +2609,7 @@ class Game {
 
     this.damageNumbers = [];
 
-    const weaponBtn = document.getElementById("weaponBtn");
-    if (weaponBtn) weaponBtn.textContent = "GUN";
-    const weaponBtnPCInit = document.getElementById("weaponBtnPC");
-    if (weaponBtnPCInit) weaponBtnPCInit.textContent = "GUN";
+    this.setWeaponLabel("GUN");
 
     this._rafId = requestAnimationFrame(ts => this._loop(ts));
   }
@@ -2620,7 +2637,7 @@ class Game {
       if (this._waveTransitionTimer <= 0) {
         // Timer expired — increment wave, spawn, resume play
         this.wave++;
-        this.cameraShake = Math.max(this.cameraShake, CONFIG.SHAKE_MAX);
+        this._addShake(CONFIG.SHAKE_MAX);
         this._isBossWave = (this.wave % 5 === 0);   // FIX(bug7): recorded per-wave
         if (this._isBossWave) {
           this.boss = new Boss(this);
@@ -2675,14 +2692,19 @@ class Game {
       this.player.weapon = modes[(idx + 1) % modes.length];
       const labels = { default: "GUN", spread: "SHOT", laser: "LASER" };
       const label  = labels[this.player.weapon] || "GUN";
-      // weaponBtn.textContent remains the single source of truth for the
-      // current weapon label; weaponBtnPC (desktop) just mirrors it so the
-      // two on-screen controls never disagree.
-      const weaponBtn = document.getElementById("weaponBtn");
-      if (weaponBtn) weaponBtn.textContent = label;
-      const weaponBtnPC = document.getElementById("weaponBtnPC");
-      if (weaponBtnPC) weaponBtnPC.textContent = label;
+      this.setWeaponLabel(label);
     }
+  }
+
+  // FIX(polish3): #weaponBtn (mobile) and #weaponBtnPC (desktop) always
+  // mirror the same label. This used to be a duplicated null-check-and-set
+  // pair at both call sites (start() and the weapon-cycle handler here);
+  // now there's exactly one place that knows about both DOM nodes.
+  setWeaponLabel(label) {
+    const weaponBtn = document.getElementById("weaponBtn");
+    if (weaponBtn) weaponBtn.textContent = label;
+    const weaponBtnPC = document.getElementById("weaponBtnPC");
+    if (weaponBtnPC) weaponBtnPC.textContent = label;
   }
 
   // ── Fixed-step physics update ──────────────────────────────────────────────
@@ -2691,7 +2713,9 @@ class Game {
     // _update is only ever called from the fixed-step accumulator loop with
     // this._FIXED_STEP, so dt should never vary — assert loudly if it does
     // rather than silently clamping.
-    console.assert(dt === this._FIXED_STEP, "_update called with non-fixed dt:", dt);
+    // FIX(polish1): gated behind DEBUG — this ran on every physics tick
+    // (up to 60x/sec) unconditionally in production before.
+    if (DEBUG) console.assert(dt === this._FIXED_STEP, "_update called with non-fixed dt:", dt);
     this.gameTime += dt;
 
     // FIX(bug12): this Set's own class-level comment says it's "cleared each
@@ -2758,7 +2782,7 @@ class Game {
                 this.player.health -= b.damage;
                 this.triggerDamageFlash(1.0);
                 this.audio.playPlayerHit();
-                this.cameraShake = Math.max(this.cameraShake, 5);
+                this._addShake(5);
               }
               hit = true;
               if (this.player.health <= 0 && this.player.alive) {
@@ -2919,7 +2943,7 @@ class Game {
         this.boss.alive = false;   // gate any same-tick collision checks
         this.spawnParticles(this.boss.x, this.boss.y, this.boss.color, 60);
         this.audio.playEnemyDeath();
-        this.cameraShake = Math.max(this.cameraShake, CONFIG.SHAKE_MAX * 2);
+        this._addShake(CONFIG.SHAKE_MAX * 2);
         // Big coin bonus for killing the boss
         this.meta.awardCoins(this.wave * 3, 0);
         // FIX(bug7 review): normal enemy deaths award XP via _handleEnemyDeath
@@ -3334,8 +3358,19 @@ class Game {
   }
 
   triggerDamageFlash(intensity = 1.0) {
-    this.damageFlash  = Math.min(1, this.damageFlash + 0.35 * intensity);
-    this.cameraShake  = Math.max(this.cameraShake, CONFIG.SHAKE_MAX * 0.6 * intensity);
+    // FIX(polish2): reduced-motion dampens the vignette flash and its
+    // paired shake to ~35% strength rather than removing the feedback
+    // entirely — players still need to know they were hit.
+    const rm = this._reducedMotion ? 0.35 : 1;
+    this.damageFlash  = Math.min(1, this.damageFlash + 0.35 * intensity * rm);
+    this._addShake(CONFIG.SHAKE_MAX * 0.6 * intensity);
+  }
+
+  // FIX(polish2): centralizes every "bump the camera shake" call site so
+  // reduced-motion dampening only has to live in one place.
+  _addShake(amount) {
+    const rm = this._reducedMotion ? 0.35 : 1;
+    this.cameraShake = Math.max(this.cameraShake, amount * rm);
   }
 
   _applyPowerup(type) {
@@ -3353,8 +3388,60 @@ class Game {
 
 
 // =============================================================================
-// SECTION 14 — BOOTSTRAP
+// SECTION 14 — GLOBAL ERROR HANDLING
+// FIX(polish4): an uncaught exception anywhere (init, the rAF loop, an
+// event handler) previously either silently froze the game or spammed the
+// console with no player-visible feedback. Log it, stop the loop so it
+// doesn't keep re-throwing every frame, and show a minimal reload prompt.
+// =============================================================================
+let _fatalErrorShown = false;
+
+function showFatalErrorOverlay(err) {
+  if (_fatalErrorShown) return;   // only ever show the overlay once
+  _fatalErrorShown = true;
+
+  // Stop the rAF loop so a repeating per-frame error can't keep firing.
+  try { if (window.kGame && window.kGame._rafId) cancelAnimationFrame(window.kGame._rafId); } catch {}
+
+  const overlay = document.createElement("div");
+  overlay.setAttribute("role", "alertdialog");
+  overlay.setAttribute("aria-label", "Error");
+  overlay.style.cssText = [
+    "position:fixed", "inset:0", "z-index:99999",
+    "display:flex", "flex-direction:column",
+    "align-items:center", "justify-content:center",
+    "gap:16px", "padding:24px", "text-align:center",
+    "background:rgba(5,8,16,0.92)", "color:#e8f0fe",
+    "font-family:'Rajdhani',sans-serif", "font-size:20px",
+  ].join(";");
+  overlay.innerHTML = `
+    <div>Something went wrong — reload to keep playing.</div>
+    <button type="button" style="
+      font:inherit; font-weight:700; padding:10px 24px; cursor:pointer;
+      background:#00e5ff; color:#050810; border:none; border-radius:6px;
+    ">Reload</button>`;
+  overlay.querySelector("button").addEventListener("click", () => window.location.reload());
+  document.body.appendChild(overlay);
+}
+
+window.addEventListener("error", e => {
+  console.error("KritikShoot fatal error:", e.error || e.message, e);
+  showFatalErrorOverlay(e.error || e.message);
+});
+
+window.addEventListener("unhandledrejection", e => {
+  console.error("KritikShoot unhandled rejection:", e.reason);
+  showFatalErrorOverlay(e.reason);
+});
+
+
+// =============================================================================
+// SECTION 15 — BOOTSTRAP
 // =============================================================================
 window.addEventListener("load", () => {
-  window.kGame = new Game();
+  try {
+    window.kGame = new Game();
+  } catch (err) {
+    showFatalErrorOverlay(err);
+  }
 });
