@@ -25,6 +25,14 @@ const CONFIG = Object.freeze({
   ENEMY_BULLET_SPEED:   360,
   WAVE_MULTIPLIER:      0.5,
 
+  // FIX(feature2): onboarding wave — wave 1 spawns from this small fixed
+  // budget instead of the normal 8+wave*3 formula (which would already be
+  // 11 at wave 1), giving new players a gentler first taste of combat.
+  // Only "normal"/"rusher" are unlocked at wave 1 anyway (see ENEMY_TABLE),
+  // so this only reduces enemy *count*, not variety.
+  ONBOARDING_WAVE1_BUDGET: 4,
+  ONBOARDING_HINT_DURATION: 6,   // seconds the control hint stays on screen
+
   SHAKE_MAX:            14,
   SHAKE_DECAY:          6.5,
   SHAKE_FREQ:           55,
@@ -159,6 +167,40 @@ const Utils = {
       }
     }
     return true;
+  },
+
+  // FIX(feature3): seeded PRNG for Daily Challenge mode. hashStringToSeed()
+  // turns an arbitrary string (the UTC date) into a 32-bit int via FNV-1a;
+  // mulberry32() is a small, fast, well-distributed PRNG driven by that int.
+  // createSeededRNG() wraps both so call sites just get a Math.random()-
+  // shaped function: () => float in [0, 1).
+  hashStringToSeed(str) {
+    let h = 0x811c9dc5; // FNV-1a offset basis
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 0x01000193); // FNV prime
+    }
+    return h >>> 0;
+  },
+
+  mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  },
+
+  createSeededRNG(seedStr) {
+    return Utils.mulberry32(Utils.hashStringToSeed(seedStr));
+  },
+
+  // Canonical "today" string for the daily seed — UTC so every player gets
+  // the same challenge on the same calendar day regardless of local timezone.
+  todayUTCString() {
+    return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
   },
 };
 
@@ -780,7 +822,7 @@ class Bullet {
     this._pooled = true;   // ObjectPool.get()/release() manage this flag
   }
 
-  init(x, y, dx, dy, size, color, damage, isEnemy, piercing = false) {
+  init(x, y, dx, dy, size, color, damage, isEnemy, piercing = false, maxPierce = 4) {
     this.x        = x;
     this.y        = y;
     this.prevX    = x;
@@ -794,6 +836,10 @@ class Bullet {
     this.piercing = piercing;
     // track how many enemies a piercing round has passed through
     this.hitCount = 0;
+    // FIX(feature1): pierce cap is now per-bullet instead of a hardcoded 4,
+    // so a synergy (or a future upgrade) can grant a bullet extra pierces
+    // without touching the collision-loop constant.
+    this.maxPierce = maxPierce;
     this.active   = true;
   }
 
@@ -914,6 +960,29 @@ class Player {
   get critChance() { return this.upgrades.critChance * 0.05; }
   get lifesteal()  { return this.upgrades.lifesteal  * 0.05; }
 
+  // FIX(feature1): upgrade synergies. This is a read-only layer on top of
+  // the existing additive upgrade math above — it doesn't change any base
+  // formula, it only flags combinations worth a bonus effect elsewhere
+  // (in _shoot() and in Game._update()'s bullet-hit handling). Threshold of
+  // 3 tiers keeps a synergy from firing on a single early pickup; it needs
+  // real investment in that stat to unlock the combo payoff.
+  static SYNERGY_TIER = 3;
+
+  getSynergies() {
+    const u = this.upgrades;
+    return {
+      // Piercing Overload — laser + heavily-invested crit chance: crit
+      // laser bolts punch through 2 more enemies than the normal cap.
+      piercingOverload: this.weapon === "laser" && u.critChance >= Player.SYNERGY_TIER,
+      // Vampiric Rage — lifesteal + an active rage buff: lifesteal healing
+      // is doubled for as long as rage is active.
+      vampiricRage: this.buffs.rage > 0 && u.lifesteal >= Player.SYNERGY_TIER,
+      // Overcharged Beam — laser + heavily-invested fire rate: laser bolts
+      // gain bonus damage scaling with fire-rate tiers past the threshold.
+      overchargedBeam: this.weapon === "laser" && u.fireRate >= Player.SYNERGY_TIER,
+    };
+  }
+
   // compute aim angle once per tick; shared by update() gate and _shoot() and draw()
   _computeAimAngle(input) {
     if (input.isMobile && this.game.enemies.length > 0) {
@@ -1008,15 +1077,24 @@ class Player {
     if (this.weapon === "laser") {
       // Piercing laser: one fat, fast bolt that passes through enemies
       audio.playLaser();
+      const synergy = this.getSynergies();
       const isCrit = Math.random() < this.critChance;
       const isRage = this.buffs.rage > 0;
-      const dmg    = (isRage || isCrit) ? this.damage * 1.8 : this.damage * 1.4;
+      let   dmg    = (isRage || isCrit) ? this.damage * 1.8 : this.damage * 1.4;
+      // FIX(feature1): Overcharged Beam — +8% damage per fire-rate tier
+      // past the synergy threshold, stacking with the laser's own bonus.
+      if (synergy.overchargedBeam) {
+        dmg *= 1 + (this.upgrades.fireRate - Player.SYNERGY_TIER + 1) * 0.08;
+      }
       const color  = "#00e5ff";
       const b      = this.game.bulletPool.get();
+      // FIX(feature1): Piercing Overload — a crit laser bolt fired with
+      // critChance heavily invested pierces 2 further than the base cap.
+      const maxPierce = (synergy.piercingOverload && isCrit) ? 6 : 4;
       b.init(this.x, this.y,
         Math.cos(angle) * this.bulletSpd * 1.5,
         Math.sin(angle) * this.bulletSpd * 1.5,
-        (isCrit ? 9 : 7) * this.game.uiScale, color, dmg, false, true /* piercing */);
+        (isCrit ? 9 : 7) * this.game.uiScale, color, dmg, false, true /* piercing */, maxPierce);
       this.game.bullets.push(b);
       this.game.trailMgr.register(b, b.color);
       return;
@@ -1918,6 +1996,11 @@ class UIManager {
     this._bindUI();
     this._renderLeaderboard();
     this._renderCoinShop();
+
+    // FIX(feature3): show today's UTC date next to the Daily Challenge
+    // toggle so it's clear which day's seed a run will use.
+    const dailyDateLabel = document.getElementById("dailyDateLabel");
+    if (dailyDateLabel) dailyDateLabel.textContent = `(${Utils.todayUTCString()})`;
   }
 
   _bindUI() {
@@ -1996,7 +2079,12 @@ class UIManager {
           this._el.mobileUI.classList.add("mobile-ui--active");
           attemptLandscapeLock();
         }
-        this.game.start();
+        // FIX(feature3): "Daily Challenge" toggle on the start screen picks
+        // the seeded-vs-random RNG for this run; explicit here so a fresh
+        // deploy from the menu always reflects the current toggle state
+        // rather than silently carrying over the previous run's mode.
+        const dailyToggle = document.getElementById("dailyModeToggle");
+        this.game.start({ daily: !!dailyToggle?.checked });
       });
     }
 
@@ -2250,6 +2338,9 @@ class UIManager {
     ctx.font      = `700 ${Math.max(13, 16 * s)}px ${CONFIG.HUD_FONT}`;
     ctx.fillStyle = CONFIG.HUD_COLOR_MAIN;
     const bossLabel = g.boss ? "  ☠ BOSS WAVE" : "";
+    // FIX(feature3): small "DAILY" tag so it's always clear on-screen
+    // whether the current run is using the seeded daily layout.
+    const dailyLabel = g.dailyMode ? "  📅 DAILY" : "";
     ctx.fillStyle = g.boss ? "#ff2d55" : CONFIG.HUD_COLOR_MAIN;
     // FIX(bug7): "KILLS x/y" is meaningless on boss waves (this.kills only
     // tracks regular-enemy deaths, and a boss wave has none) — show the
@@ -2257,7 +2348,7 @@ class UIManager {
     const progressLabel = g.boss
       ? `BOSS HP ${Math.max(0, Math.ceil(g.boss.hp))}/${g.boss.maxHp}`
       : `KILLS ${g.kills}/${g.wave}   ENEMIES ${g.enemies.length}`;
-    ctx.fillText(`WAVE ${g.wave}${bossLabel}   ${progressLabel}`, m, m);
+    ctx.fillText(`WAVE ${g.wave}${bossLabel}${dailyLabel}   ${progressLabel}`, m, m);
 
     ctx.font      = `600 ${Math.max(12, 14 * s)}px ${CONFIG.HUD_FONT}`;
     ctx.fillStyle = "rgba(232,240,254,0.7)";
@@ -2297,6 +2388,23 @@ class UIManager {
         ctx.fillStyle = CONFIG.POWERUP_COLORS[key] || "#fff";
         ctx.fillText(`${key.toUpperCase()}  ${p.buffs[key].toFixed(1)}s`, m, buffY);
         buffY += lh;
+      }
+    }
+
+    // FIX(feature1): surface active upgrade synergies so the payoff of the
+    // combo is actually visible, not just a silent damage-number difference.
+    const synergyLabels = {
+      piercingOverload: "⚡ PIERCING OVERLOAD",
+      vampiricRage:     "🩸 VAMPIRIC RAGE",
+      overchargedBeam:  "☢ OVERCHARGED BEAM",
+    };
+    const synergies = p.getSynergies();
+    for (const key in synergies) {
+      if (synergies[key]) {
+        ctx.font      = `700 ${Math.max(10, 12 * s)}px ${CONFIG.HUD_FONT}`;
+        ctx.fillStyle = "#f1c40f";
+        ctx.fillText(synergyLabels[key], m, buffY);
+        buffY += lh * 0.8;
       }
     }
 
@@ -2341,6 +2449,32 @@ class UIManager {
       ctx.textAlign = "left";
     }
 
+    ctx.restore();
+    this._drawOnboardingHint(ctx);
+  }
+
+  // FIX(feature2): onboarding wave — a short on-canvas control hint shown
+  // only during wave 1, fading out over its last 1.5s. Text adapts to
+  // input method via the existing _shouldShowMobileUI() check (no new
+  // device-detection path added).
+  _drawOnboardingHint(ctx) {
+    const g = this.game;
+    if (g.wave !== 1 || g.fsm.isNot(GameState.PLAYING)) return;
+    const t = CONFIG.ONBOARDING_HINT_DURATION - g.gameTime;
+    if (t <= 0) return;
+
+    const fade = Utils.clamp(t / 1.5, 0, 1);
+    const s    = g.uiScale;
+    const text = this._shouldShowMobileUI()
+      ? "Joystick to move · Drag right side to aim · FIRE to shoot"
+      : "WASD / Arrows to move · Mouse to aim · Click to shoot";
+
+    ctx.save();
+    ctx.textAlign    = "center";
+    ctx.textBaseline = "top";
+    ctx.font         = `700 ${Math.max(13, 16 * s)}px ${CONFIG.HUD_FONT}`;
+    ctx.fillStyle    = `rgba(232,240,254,${0.85 * fade})`;
+    ctx.fillText(text, g.width / 2, 20 * s);
     ctx.restore();
   }
 
@@ -2466,6 +2600,11 @@ class Game {
       ? reduceMotionQuery.addEventListener("change", onReducedMotionChange)
       : reduceMotionQuery.addListener(onReducedMotionChange); // Safari < 14 fallback
 
+    // FIX(feature3): default RNG is plain Math.random; start() swaps this
+    // for a seeded generator when Daily Challenge mode is active.
+    this.dailyMode = false;
+    this.rng       = Math.random;
+
     this._FIXED_STEP  = 1 / 60;
     this._accumulator = 0;
 
@@ -2562,7 +2701,7 @@ class Game {
     GlowCache.clear();
   }
 
-  start() {
+  start(options = {}) {
     cancelAnimationFrame(this._rafId);
 
     // Drain active entities back to pools before abandoning arrays
@@ -2572,6 +2711,16 @@ class Game {
     if (this.particles) {
       for (const p of this.particles) { p.active = false; this.particlePool.release(p); }
     }
+
+    // FIX(feature3): Daily Challenge mode — same UTC date → same wall
+    // layout + enemy spawn sequence for every player, everywhere. `daily`
+    // defaults to whatever the previous run used (so Restart / Play Again
+    // stays in the mode the player picked) unless explicitly overridden.
+    this.dailyMode = options.daily !== undefined ? !!options.daily : !!this.dailyMode;
+    this.dailySeedDate = Utils.todayUTCString();
+    this.rng = this.dailyMode
+      ? Utils.createSeededRNG(`kritikshoot-daily-${this.dailySeedDate}`)
+      : Math.random;
 
     this.player    = new Player(this);
     this.enemies   = [];
@@ -2808,14 +2957,20 @@ class Game {
               // count pierce hits; destroy bullet after MAX_PIERCE enemies
               if (b.piercing) {
                 b.hitCount++;
-                if (b.hitCount >= 4) hit = true;   // nerf: cap at 4 penetrations
+                // FIX(feature1): was a hardcoded `4` — now reads the
+                // per-bullet cap set in Player._shoot() (see Bullet.init()),
+                // so the Piercing Overload synergy can raise it for crits.
+                if (b.hitCount >= b.maxPierce) hit = true;
               } else {
                 hit = true;
               }
               if (this.player.lifesteal > 0) {
+                // FIX(feature1): Vampiric Rage — lifesteal + an active rage
+                // buff doubles the heal-back on this hit.
+                const healMult = this.player.getSynergies().vampiricRage ? 2 : 1;
                 this.player.health = Math.min(
                   this.player.maxHealth,
-                  this.player.health + b.damage * this.player.lifesteal
+                  this.player.health + b.damage * this.player.lifesteal * healMult
                 );
               }
               // O(1) index lookup via pre-built map
@@ -3201,15 +3356,19 @@ class Game {
    */
   _spawnWave() {
     const wave   = this.wave;
-    let   budget = Math.min(60, 8 + wave * 3);
+    // FIX(feature2): wave 1 uses the small onboarding budget instead of the
+    // normal formula (see CONFIG.ONBOARDING_WAVE1_BUDGET for rationale).
+    let   budget = (wave === 1) ? CONFIG.ONBOARDING_WAVE1_BUDGET : Math.min(60, 8 + wave * 3);
 
     // Helper: pick a spawn position on a random edge of the arena
+    // FIX(feature3): Math.random() → this.rng() so Daily Challenge mode
+    // (a seeded generator) produces the same spawn sequence every time.
     const _edgePos = () => {
-      const side = Math.floor(Math.random() * 4);
+      const side = Math.floor(this.rng() * 4);
       return {
         // use width-1 / height-1 so enemies never spawn one pixel outside the canvas
-        x: side === 0 ? 0 : side === 1 ? this.width  - 1 : Math.random() * this.width,
-        y: side === 2 ? 0 : side === 3 ? this.height - 1 : Math.random() * this.height,
+        x: side === 0 ? 0 : side === 1 ? this.width  - 1 : this.rng() * this.width,
+        y: side === 2 ? 0 : side === 3 ? this.height - 1 : this.rng() * this.height,
       };
     };
 
@@ -3226,7 +3385,7 @@ class Game {
       // Safety: if nothing fits (shouldn't happen since rusher/normal cost 1)
       if (pool.length === 0) break;
 
-      const chosen = pool[Math.floor(Math.random() * pool.length)];
+      const chosen = pool[Math.floor(this.rng() * pool.length)];
       const pos    = _edgePos();
       this.enemies.push(new Enemy(this, pos.x, pos.y, chosen.type, wf));
       budget -= chosen.cost;
@@ -3248,36 +3407,39 @@ class Game {
       return Utils.distSq(cx, cy, nearX, nearY) < EXCLUSION * EXCLUSION;
     };
 
-    // ── Destructible walls (existing behaviour) ────────────────────────────
-    const wCount = Math.floor(Math.random() * 6) + 5;
+    // ── Destructible walls (existing behaviour) ─────────────────────────────
+    // FIX(feature3): Math.random() → this.rng() throughout this method, so
+    // Daily Challenge mode's seeded generator reproduces the same wall/
+    // crate layout for the same UTC date.
+    const wCount = Math.floor(this.rng() * 6) + 5;
     for (let i = 0; i < wCount; i++) {
       let wx, wy, w, h;
       let attempts = 0;
       do {
-        w  = 100 + Math.random() * 110;
-        h  = 18  + Math.random() * 28;
-        wx = Math.random() * (this.width  - w - 40) + 20;
-        wy = Math.random() * (this.height - h - 40) + 20;
+        w  = 100 + this.rng() * 110;
+        h  = 18  + this.rng() * 28;
+        wx = this.rng() * (this.width  - w - 40) + 20;
+        wy = this.rng() * (this.height - h - 40) + 20;
         attempts++;
       } while (_tooClose(wx, wy, w, h) && attempts < 20);
       // generate hp first so maxHp can mirror it — HP bar starts full at spawn
-      const hp = Math.floor(Math.random() * 5) + 3;
+      const hp = Math.floor(this.rng() * 5) + 3;
       this.walls.push({ x: wx, y: wy, w, h, hp, maxHp: hp });
     }
 
-    // ── Indestructible crates / pillars ────────────────────────────────────
+    // ── Indestructible crates / pillars ─────────────────────────────────────
     // Mix of square "crates" and taller "pillar" rectangles
-    const cCount = Math.floor(Math.random() * 5) + 4;
+    const cCount = Math.floor(this.rng() * 5) + 4;
     const margin = 60;
     for (let i = 0; i < cCount; i++) {
       let cx2, cy2, w, h;
-      const isPillar = Math.random() < 0.35;
+      const isPillar = this.rng() < 0.35;
       let attempts = 0;
       do {
-        w = isPillar ? 22 + Math.random() * 14 : 38 + Math.random() * 30;
-        h = isPillar ? 70 + Math.random() * 50 : w * (0.8 + Math.random() * 0.4);
-        cx2 = Math.random() * (this.width  - w - margin * 2) + margin;
-        cy2 = Math.random() * (this.height - h - margin * 2) + margin;
+        w = isPillar ? 22 + this.rng() * 14 : 38 + this.rng() * 30;
+        h = isPillar ? 70 + this.rng() * 50 : w * (0.8 + this.rng() * 0.4);
+        cx2 = this.rng() * (this.width  - w - margin * 2) + margin;
+        cy2 = this.rng() * (this.height - h - margin * 2) + margin;
         attempts++;
       } while (_tooClose(cx2, cy2, w, h) && attempts < 20);
       this.crates.push({ x: cx2, y: cy2, w, h, isPillar });
