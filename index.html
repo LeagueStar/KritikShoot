@@ -46,6 +46,14 @@
           <span class="btn__label">DEPLOY</span>
           <span class="btn__glow"></span>
         </button>
+        <!-- FIX(feature3): Daily Challenge toggle — read by UIManager's
+             startBtn handler at deploy time; game.js derives the seeded RNG
+             from today's UTC date when checked. Purely in-memory, no new
+             localStorage key. -->
+        <label class="daily-toggle" for="dailyModeToggle">
+          <input type="checkbox" id="dailyModeToggle" />
+          <span class="daily-toggle__label">Daily Challenge <span id="dailyDateLabel" class="daily-toggle__date"></span></span>
+        </label>
       </div>
       <div id="localLeaderboard" class="leaderboard" aria-label="Local Leaderboard"></div>
     </div>
