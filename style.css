@@ -1252,6 +1252,42 @@ button:active {
   transform: translate(-50%, 0);
 }
 
+/* ─────────────────────────────────────────────────────────────
+   FIX(feature3): Daily Challenge toggle — sits under #startBtn in
+   .start-form, reuses the same design tokens as .input-field/buttons
+   rather than introducing new colors.
+   ───────────────────────────────────────────────────────────── */
+.daily-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: calc(0.95rem * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--col-text-muted);
+  user-select: none;
+}
+
+.daily-toggle input[type="checkbox"] {
+  width: calc(18px * var(--ui-scale));
+  height: calc(18px * var(--ui-scale));
+  accent-color: var(--col-primary);
+  cursor: pointer;
+}
+
+.daily-toggle:has(input:checked) {
+  color: var(--col-primary);
+}
+
+.daily-toggle__date {
+  color: var(--col-text-muted);
+  font-weight: 400;
+  font-size: 0.85em;
+}
+
 /* FIX(polish2): prefers-reduced-motion — stop purely decorative infinite
    animations (logo flicker, spinning icons) and shorten UI transitions.
    Camera shake / damage-flash dampening for canvas rendering is handled in
