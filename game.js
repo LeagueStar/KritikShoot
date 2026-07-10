@@ -36,6 +36,10 @@ const CONFIG = Object.freeze({
   SHAKE_MAX:            14,
   SHAKE_DECAY:          6.5,
   SHAKE_FREQ:           55,
+  // FIX(bug4): low-frequency "thud" component summed with the high-freq
+  // rattle above, only for high-intensity events (boss death, exploder,
+  // boss dash contact) — see Game._addShake()/_draw().
+  SHAKE_THUD_FREQ:      10,
 
   PARTICLE_FRICTION:    0.88,
   PARTICLE_DECAY:       0.94,
@@ -55,6 +59,18 @@ const CONFIG = Object.freeze({
     triple_shot:  "#ff9f43",
     speed_boost:  "#1dd1a1",
     rage:         "#ff4757",
+  },
+  // FIX(bug2): colorblind accessibility — a distinct glyph per powerup type,
+  // drawn on top of the existing glow sprite so type reads without relying
+  // on hue alone. Plain unicode symbols (not emoji) for consistent cross-
+  // platform canvas rendering at small sizes.
+  POWERUP_GLYPHS: {
+    health:       "+",
+    xp:           "\u2726",  // ✦
+    shield:       "\u25C8",  // ◈
+    triple_shot:  "\u039E",  // Ξ (three bars — reads as a spread/triple)
+    speed_boost:  "\u00BB",  // »
+    rage:         "\u2739",  // ✹
   },
 
   HUD_FONT:             "'Rajdhani', sans-serif",
@@ -984,8 +1000,12 @@ class Player {
   }
 
   // compute aim angle once per tick; shared by update() gate and _shoot() and draw()
+  // FIX(bug3): the nearest-enemy fallback (previously mobile-only) now also
+  // covers keyboard fire before any mouse movement has happened this
+  // session — reuses the exact same scan rather than duplicating it.
   _computeAimAngle(input) {
-    if (input.isMobile && this.game.enemies.length > 0) {
+    const needsFallback = (input.isMobile || !input._mouseMoved) && this.game.enemies.length > 0;
+    if (needsFallback) {
       let nearestDSq = Infinity, nearest = this.game.enemies[0];
       for (const e of this.game.enemies) {
         const dSq = Utils.distSq(this.x, this.y, e.x, e.y);
@@ -1231,13 +1251,20 @@ class Enemy {
     this.damage    = 10 + Math.floor(waveFactor * 2);
     this._lastShot = game.gameTime;
 
+    // FIX(bug1): melee contact-damage tuning per type — read by the
+    // proximity check in update(). Tank hits harder and less often;
+    // rusher hits lighter but more frequently, matching its "swarm" role.
+    this._lastMeleeHit = -Infinity;
+
     switch (type) {
       case "tank":
         this.color = "#3498db"; this.size = 30 * game.uiScale; this.speed = 40;
-        this.hp = baseHp * 2.5; this.shootDelay = 99; break;  // no shooting
+        this.hp = baseHp * 2.5; this.shootDelay = 99;  // no shooting
+        this.meleeCooldown = 0.9; this.meleeDamageMult = 2.5; break;
       case "rusher":
         this.color = "#e74c3c"; this.size = 14 * game.uiScale; this.speed = 240;
-        this.hp = baseHp * 0.4; this.shootDelay = 99; break;  // melee only
+        this.hp = baseHp * 0.4; this.shootDelay = 99;  // melee only
+        this.meleeCooldown = 0.4; this.meleeDamageMult = 1.0; break;
       case "ranged":
         this.color = "#00e5ff"; this.size = 18 * game.uiScale; this.speed = 60;
         this.hp = baseHp * 0.8; this.shootDelay = 1.2;
@@ -1325,6 +1352,31 @@ class Enemy {
     const ny = this.y + sdy * dt;
     if (!this.game.checkWallCollision(nx, ny, this.size)) { this.x = nx; this.y = ny; }
 
+    // FIX(bug1): melee contact damage for tank/rusher. These types are
+    // configured with shootDelay: 99 ("melee only") but previously had no
+    // actual damage path — mirrors the boss dash's proximity-check pattern
+    // (dSq < (size+size)^2) with its own per-enemy cooldown so it ticks at
+    // most once per meleeCooldown seconds while touching, instead of every
+    // physics frame. Uses a direct distance check against the player (not
+    // a SpatialHash query), so there's no risk of double-counting a hit
+    // across neighbour-query results.
+    if ((this.type === "tank" || this.type === "rusher") && player.alive) {
+      const meleeDSq = Utils.distSq(this.x, this.y, player.x, player.y);
+      const meleeMinD = this.size + player.size;
+      if (meleeDSq < meleeMinD * meleeMinD) {
+        const sinceLastMelee = this.game.gameTime - this._lastMeleeHit;
+        if (sinceLastMelee >= this.meleeCooldown) {
+          this._lastMeleeHit = this.game.gameTime;
+          if (player.buffs.shield <= 0) {
+            player.health -= this.damage * this.meleeDamageMult;
+            this.game.triggerDamageFlash(this.type === "tank" ? 1.2 : 0.8);
+            this.game.audio.playPlayerHit();
+            if (player.health <= 0) { player.alive = false; player.health = 0; }
+          }
+        }
+      }
+    }
+
     const timeSinceShot = this.game.gameTime - this._lastShot;
     // ranged enemies must have LoS before firing; others fire freely
     const canFire = (this.type === "ranged")
@@ -1342,15 +1394,17 @@ class Enemy {
         if (dSq < blastRadSq && player.alive) {
           const falloff = 1 - (Math.sqrt(dSq) / Math.sqrt(blastRadSq));
           player.health -= this.damage * 2 * falloff;
-          this.game.triggerDamageFlash(1.5);
+          this.game.triggerDamageFlash(1.5, true);   // FIX(bug4): high-intensity — thud
           this.game.audio.playPlayerHit();
-          this.game._addShake(CONFIG.SHAKE_MAX * 1.5);
+          this.game._addShake(CONFIG.SHAKE_MAX * 1.5, true);   // FIX(bug4)
           if (player.health <= 0) { player.alive = false; player.health = 0; }
         }
         return;
       }
 
-      // tank and rusher are melee-only
+      // tank and rusher are melee-only — shootDelay: 99 means canFire here is
+      // effectively unreachable for them; real melee damage now happens in
+      // the proximity check above (FIX(bug1)). Left as a defensive no-op.
       if (this.type === "tank" || this.type === "rusher") return;
 
       const shootAngle = Math.atan2(player.y - this.y, player.x - this.x);
@@ -1617,7 +1671,7 @@ class Boss {
           if (dSq < (this.size + player.size) ** 2) {
             if (player.buffs.shield <= 0) {
               player.health -= this.damage * 3;
-              this.game.triggerDamageFlash(2.0);
+              this.game.triggerDamageFlash(2.0, true);   // FIX(bug4): high-intensity — thud
               this.game.audio.playPlayerHit();
               if (player.health <= 0) { player.alive = false; player.health = 0; }
             }
@@ -1755,7 +1809,14 @@ class InputManager {
     // — e.g. releasing the FIRE button while an aim-touch was still down
     // silently stopped fire. Each source now only owns its own flag, and
     // isShooting is derived as the OR of all of them via _updateShootState().
-    this._shootSources = { mouse: false, aimTouch: false, fireBtn: false, joystick: false };
+    // FIX(bug3): keyboard source added alongside mouse/touch/joystick —
+    // composes through the same _updateShootState() OR-gate as everything else.
+    this._shootSources = { mouse: false, aimTouch: false, fireBtn: false, joystick: false, keyboard: false };
+
+    // FIX(bug3): tracks whether the mouse has moved at all this session, so
+    // Player._computeAimAngle() can fall back to nearest-enemy auto-aim for
+    // keyboard-only fire before any mouse input has occurred.
+    this._mouseMoved = false;
 
     this._bindListeners();
   }
@@ -1763,7 +1824,7 @@ class InputManager {
   // FIX(bug9): recompute the public isShooting flag from all active sources.
   _updateShootState() {
     const s = this._shootSources;
-    this.isShooting = s.mouse || s.aimTouch || s.fireBtn || s.joystick;
+    this.isShooting = s.mouse || s.aimTouch || s.fireBtn || s.joystick || s.keyboard;
   }
 
   // Re-evaluates on every read so rotating a tablet or resizing a window
@@ -1778,13 +1839,36 @@ class InputManager {
     const knob     = joy ? joy.querySelector(".joystick__knob") : null;
     const shootBtn = document.getElementById("shootBtn");
 
-    window.addEventListener("keydown", e => { this.keys[e.key.toLowerCase()] = true; });
-    window.addEventListener("keyup",   e => { this.keys[e.key.toLowerCase()] = false; });
+    window.addEventListener("keydown", e => {
+      this.keys[e.key.toLowerCase()] = true;
+      // FIX(bug3): Spacebar fires toward the current aim direction (mouse
+      // aim, or nearest-enemy fallback — see Player._computeAimAngle()).
+      // Gated on PLAYING so Space doesn't hijack menus/inputs elsewhere
+      // (e.g. the nickname field), and only fires once per physical
+      // keydown (ignores OS key-repeat) via the _shootSources.keyboard guard.
+      if ((e.code === "Space" || e.key === " ") &&
+          this._game && this._game.fsm.is(GameState.PLAYING)) {
+        e.preventDefault();
+        if (!this._shootSources.keyboard) {
+          this._shootSources.keyboard = true;
+          this._updateShootState();
+          this._shootBuffer = true;
+        }
+      }
+    });
+    window.addEventListener("keyup", e => {
+      this.keys[e.key.toLowerCase()] = false;
+      if (e.code === "Space" || e.key === " ") {
+        this._shootSources.keyboard = false;
+        this._updateShootState();
+      }
+    });
 
     window.addEventListener("mousemove", e => {
       const rect  = canvas.getBoundingClientRect();
       this.mouseX = e.clientX - rect.left;
       this.mouseY = e.clientY - rect.top;
+      this._mouseMoved = true;   // FIX(bug3)
     });
     window.addEventListener("mousedown", () => {
       this._shootSources.mouse = true;   // FIX(bug9)
@@ -2589,6 +2673,11 @@ class Game {
     this.cameraShake = 0;
     this.damageFlash = 0;   // seconds remaining for red vignette
     this._shakeTime  = 0;
+    // FIX(bug4): low-frequency "thud" layer, tracked independently of the
+    // high-frequency rattle above so it decays and oscillates on its own
+    // clock — only ever set for high-intensity events (see _addShake()).
+    this.thudShake   = 0;
+    this._thudTime   = 0;
     this._rafId      = null;
 
     // FIX(polish2): respect prefers-reduced-motion — dampen (not eliminate,
@@ -2742,6 +2831,8 @@ class Game {
     this.cameraShake  = 0;
     this.damageFlash  = 0;
     this._shakeTime   = 0;
+    this.thudShake    = 0;   // FIX(bug4)
+    this._thudTime    = 0;   // FIX(bug4)
     this._accumulator = 0;
     this.trailMgr.clear();
 
@@ -3098,7 +3189,7 @@ class Game {
         this.boss.alive = false;   // gate any same-tick collision checks
         this.spawnParticles(this.boss.x, this.boss.y, this.boss.color, 60);
         this.audio.playEnemyDeath();
-        this._addShake(CONFIG.SHAKE_MAX * 2);
+        this._addShake(CONFIG.SHAKE_MAX * 2, true);   // FIX(bug4): high-intensity — thud
         // Big coin bonus for killing the boss
         this.meta.awardCoins(this.wave * 3, 0);
         // FIX(bug7 review): normal enemy deaths award XP via _handleEnemyDeath
@@ -3144,6 +3235,12 @@ class Game {
       this.cameraShake *= Math.exp(-CONFIG.SHAKE_DECAY * dt);
       if (this.cameraShake < 0.05) { this.cameraShake = 0; this._shakeTime = 0; }
     }
+    // FIX(bug4): thud layer decays on the same curve, independent clock.
+    if (this.thudShake > 0) {
+      this._thudTime  += dt;
+      this.thudShake  *= Math.exp(-CONFIG.SHAKE_DECAY * dt);
+      if (this.thudShake < 0.05) { this.thudShake = 0; this._thudTime = 0; }
+    }
 
     if (this.player && !this.player.alive && this.fsm.isNot(GameState.GAME_OVER)) {
       this.fsm.transition(GameState.GAME_OVER);
@@ -3161,9 +3258,19 @@ class Game {
 
     ctx.save();
 
-    if (this.cameraShake > 0.05) {
-      const ox = Math.sin(this._shakeTime * CONFIG.SHAKE_FREQ * Math.PI * 2)       * this.cameraShake;
-      const oy = Math.sin(this._shakeTime * CONFIG.SHAKE_FREQ * Math.PI * 2 + 1.5) * this.cameraShake;
+    if (this.cameraShake > 0.05 || this.thudShake > 0.05) {
+      let ox = 0, oy = 0;
+      if (this.cameraShake > 0.05) {
+        ox += Math.sin(this._shakeTime * CONFIG.SHAKE_FREQ * Math.PI * 2)       * this.cameraShake;
+        oy += Math.sin(this._shakeTime * CONFIG.SHAKE_FREQ * Math.PI * 2 + 1.5) * this.cameraShake;
+      }
+      // FIX(bug4): low-frequency thud, summed on top of the rattle above —
+      // only ever non-zero for high-intensity events (see _addShake()), so
+      // big hits get a structurally different shake, not just a bigger one.
+      if (this.thudShake > 0.05) {
+        ox += Math.sin(this._thudTime * CONFIG.SHAKE_THUD_FREQ * Math.PI * 2)       * this.thudShake;
+        oy += Math.sin(this._thudTime * CONFIG.SHAKE_THUD_FREQ * Math.PI * 2 + 2.1) * this.thudShake;
+      }
       ctx.translate(ox, oy);
     }
 
@@ -3236,6 +3343,24 @@ class Game {
         ctx.arc(pu.x, pu.y, pu.size + pulse, 0, Math.PI * 2);
         ctx.fill();
       }
+
+      // FIX(bug2): colorblind accessibility — draw a distinct glyph per
+      // type on top of the glow sprite above so type reads without relying
+      // on hue. Dark offset copy + white top copy gives a cheap outline
+      // that stays legible against every powerup color.
+      ctx.textAlign    = "center";
+      ctx.textBaseline = "middle";
+      for (const pu of this.powerups) {
+        const glyph = CONFIG.POWERUP_GLYPHS[pu.type];
+        if (!glyph) continue;
+        ctx.font = `700 ${Math.max(10, (pu.size + pulse) * 1.15)}px ${CONFIG.HUD_FONT}`;
+        ctx.fillStyle = "rgba(5,8,16,0.85)";
+        ctx.fillText(glyph, pu.x, pu.y + 1);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(glyph, pu.x, pu.y);
+      }
+      ctx.textAlign    = "left";
+      ctx.textBaseline = "alphabetic";
     }
 
     // ── Particles ──────────────────────────────────────────────────────
@@ -3519,20 +3644,25 @@ class Game {
     Utils.removeFast(this.enemies, index);
   }
 
-  triggerDamageFlash(intensity = 1.0) {
+  // FIX(bug4): `big` opts a hit into the low-frequency thud layer (summed
+  // with the normal rattle in _draw()) — pass true for high-intensity
+  // events only (boss death, exploder, boss dash contact).
+  triggerDamageFlash(intensity = 1.0, big = false) {
     // FIX(polish2): reduced-motion dampens the vignette flash and its
     // paired shake to ~35% strength rather than removing the feedback
     // entirely — players still need to know they were hit.
     const rm = this._reducedMotion ? 0.35 : 1;
     this.damageFlash  = Math.min(1, this.damageFlash + 0.35 * intensity * rm);
-    this._addShake(CONFIG.SHAKE_MAX * 0.6 * intensity);
+    this._addShake(CONFIG.SHAKE_MAX * 0.6 * intensity, big);
   }
 
   // FIX(polish2): centralizes every "bump the camera shake" call site so
   // reduced-motion dampening only has to live in one place.
-  _addShake(amount) {
+  // FIX(bug4): `big` also feeds the independent thud layer.
+  _addShake(amount, big = false) {
     const rm = this._reducedMotion ? 0.35 : 1;
     this.cameraShake = Math.max(this.cameraShake, amount * rm);
+    if (big) this.thudShake = Math.max(this.thudShake, amount * rm);
   }
 
   _applyPowerup(type) {
