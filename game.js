@@ -102,6 +102,54 @@ const ENEMY_TABLE = Object.freeze([
   { type: "exploder", cost: 3, unlockWave: 5, weight: 2 },
   { type: "tank",     cost: 3, unlockWave: 6, weight: 1 },
 ]);
+
+// =============================================================================
+// SECTION 1c — ENEMY TYPES
+// FIX(perf4): single source of truth for per-type visual/gameplay stats.
+// Previously adding a type meant touching three places: the Enemy
+// constructor's switch (color/size/speed/hp/shootDelay), the rotSpeed
+// ternary chain in draw(), and the sides ternary chain in draw() — all of
+// which had to be kept in sync by hand. Now both read from here.
+//   baseSize          — × game.uiScale = Enemy.size
+//   hpMul             — × the wave's baseHp = Enemy.hp
+//   sides / rotSpeed  — draw()'s rotating-polygon silhouette
+//   preferredDistMul  — ranged-only: × game.uiScale = orbit distance
+//   meleeCooldown / meleeDamageMult — tank/rusher-only: see FIX(bug1)
+// =============================================================================
+const ENEMY_TYPES = Object.freeze({
+  normal: {
+    color: "#2ecc71", baseSize: 20, speed: CONFIG.BASE_ENEMY_SPEED,
+    hpMul: 1.0, shootDelay: 2.0, sides: 4, rotSpeed: 1.2,
+  },
+  rusher: {
+    color: "#e74c3c", baseSize: 14, speed: 240,
+    hpMul: 0.4, shootDelay: 99, sides: 3, rotSpeed: 4.0,   // shootDelay 99 == melee only
+    meleeCooldown: 0.4, meleeDamageMult: 1.0,
+  },
+  fast: {
+    color: "#f1c40f", baseSize: 16, speed: 185,
+    hpMul: 0.6, shootDelay: 1.5, sides: 3, rotSpeed: 4.0,
+  },
+  ranged: {
+    color: "#00e5ff", baseSize: 18, speed: 60,
+    hpMul: 0.8, shootDelay: 1.2, sides: 8, rotSpeed: 1.2,  // octagon — reads as "technological"
+    preferredDistMul: 260,
+  },
+  spread: {
+    color: "#9b59b6", baseSize: 20, speed: 70,
+    hpMul: 1.0, shootDelay: 2.5, sides: 5, rotSpeed: 1.2,
+  },
+  exploder: {
+    color: "#e67e22", baseSize: 22, speed: 105,
+    hpMul: 1.0, shootDelay: 4.0, sides: 4, rotSpeed: 1.2,
+  },
+  tank: {
+    color: "#3498db", baseSize: 30, speed: 40,
+    hpMul: 2.5, shootDelay: 99, sides: 6, rotSpeed: 0.3,   // shootDelay 99 == no shooting
+    meleeCooldown: 0.9, meleeDamageMult: 2.5,
+  },
+});
+
 const Utils = {
 
   distSq(x1, y1, x2, y2) {
@@ -258,9 +306,25 @@ class SpatialHash {
     this._map     = new Map();
     this._scratch = [];   // shared query result buffer — see class comment
     this._stamp   = 0;    // incremented every query(); written onto entities to dedup
+    // FIX(perf1): pool of bucket arrays reused across clear()/insert()
+    // cycles. clear()+full-reinsert runs every physics tick for every
+    // entity (Game._update()); at 40+ concurrent enemies (a realistic
+    // late-wave count per the budget formula in _spawnWave), each usually
+    // touching 1-4 grid cells, that was 100+ short-lived array allocations
+    // per tick for the GC to reclaim. Reusing the arrays (reset via
+    // .length = 0, not discarded) avoids that churn without turning this
+    // into a persistent incremental structure — the Map itself is still
+    // cleared every tick, so stale grid-cell keys never accumulate.
+    this._bucketPool = [];
   }
 
-  clear() { this._map.clear(); }
+  clear() {
+    for (const bucket of this._map.values()) {
+      bucket.length = 0;
+      this._bucketPool.push(bucket);
+    }
+    this._map.clear();
+  }
 
   // Packed integer key instead of string concatenation — this runs on the
   // hottest path in the file (every tick, every entity insert/query).
@@ -283,8 +347,13 @@ class SpatialHash {
     for (let gx = minX; gx <= maxX; gx++) {
       for (let gy = minY; gy <= maxY; gy++) {
         const k = this._key(gx, gy);
-        if (!this._map.has(k)) this._map.set(k, []);
-        this._map.get(k).push(entity);
+        let bucket = this._map.get(k);
+        if (!bucket) {
+          // FIX(perf1): pull a reset array from the pool instead of `[]`
+          bucket = this._bucketPool.pop() || [];
+          this._map.set(k, bucket);
+        }
+        bucket.push(entity);
       }
     }
   }
@@ -395,9 +464,13 @@ class ObjectPool {
 // =============================================================================
 const GlowCache = {
   _map: new Map(),
+  // FIX(perf2): global glow-radius multiplier, set by Game based on
+  // _lowPowerMode. Kept here (one spot) instead of touching every
+  // GlowCache.get() call site individually. 1 = unchanged (desktop default).
+  padScale: 1,
 
   get(color, radius, pad = null) {
-    pad = pad ?? radius * 1.5;
+    pad = (pad ?? radius * 1.5) * GlowCache.padScale;
     const key = `${color}:${radius | 0}:${pad | 0}`;
     let   g   = this._map.get(key);
     if (g) {
@@ -1250,41 +1323,30 @@ class Enemy {
     const baseHp   = 20 + Math.floor(waveFactor * 10);
     this.damage    = 10 + Math.floor(waveFactor * 2);
     this._lastShot = game.gameTime;
-
-    // FIX(bug1): melee contact-damage tuning per type — read by the
-    // proximity check in update(). Tank hits harder and less often;
-    // rusher hits lighter but more frequently, matching its "swarm" role.
     this._lastMeleeHit = -Infinity;
 
-    switch (type) {
-      case "tank":
-        this.color = "#3498db"; this.size = 30 * game.uiScale; this.speed = 40;
-        this.hp = baseHp * 2.5; this.shootDelay = 99;  // no shooting
-        this.meleeCooldown = 0.9; this.meleeDamageMult = 2.5; break;
-      case "rusher":
-        this.color = "#e74c3c"; this.size = 14 * game.uiScale; this.speed = 240;
-        this.hp = baseHp * 0.4; this.shootDelay = 99;  // melee only
-        this.meleeCooldown = 0.4; this.meleeDamageMult = 1.0; break;
-      case "ranged":
-        this.color = "#00e5ff"; this.size = 18 * game.uiScale; this.speed = 60;
-        this.hp = baseHp * 0.8; this.shootDelay = 1.2;
-        this._preferredDist  = 260 * game.uiScale;
-        // randomise orbit direction so enemies don't all strafe the same way
-        this.orbitDirection  = Math.random() < 0.5 ? 1 : -1;
-        break;
-      case "fast":
-        this.color = "#f1c40f"; this.size = 16 * game.uiScale; this.speed = 185;
-        this.hp = baseHp * 0.6; this.shootDelay = 1.5; break;
-      case "spread":
-        this.color = "#9b59b6"; this.size = 20 * game.uiScale; this.speed = 70;
-        this.hp = baseHp; this.shootDelay = 2.5; break;
-      case "exploder":
-        this.color = "#e67e22"; this.size = 22 * game.uiScale; this.speed = 105;
-        this.hp = baseHp; this.shootDelay = 4.0; break;
-      default:
-        this.color = "#2ecc71"; this.size = 20 * game.uiScale; this.speed = CONFIG.BASE_ENEMY_SPEED;
-        this.hp = baseHp; this.shootDelay = 2.0;
+    // FIX(perf4): per-type stats now read from ENEMY_TYPES (see SECTION 1c)
+    // instead of a local switch — pure refactor, numbers are unchanged.
+    const def = ENEMY_TYPES[type] || ENEMY_TYPES.normal;
+    this.color      = def.color;
+    this.size       = def.baseSize * game.uiScale;
+    this.speed      = def.speed;
+    this.hp         = baseHp * def.hpMul;
+    this.shootDelay = def.shootDelay;
+
+    if (def.preferredDistMul !== undefined) {
+      this._preferredDist = def.preferredDistMul * game.uiScale;
+      // randomise orbit direction so enemies don't all strafe the same way
+      this.orbitDirection = Math.random() < 0.5 ? 1 : -1;
     }
+    if (def.meleeCooldown !== undefined) {
+      // FIX(bug1): melee contact-damage tuning per type — read by the
+      // proximity check in update(). Tank hits harder and less often;
+      // rusher hits lighter but more frequently, matching its "swarm" role.
+      this.meleeCooldown   = def.meleeCooldown;
+      this.meleeDamageMult = def.meleeDamageMult;
+    }
+
     this.maxHp = this.hp;
   }
 
@@ -1440,16 +1502,13 @@ class Enemy {
     ctx.save();
     ctx.translate(rx, ry);
 
-    const rotSpeed = this.type === "fast" || this.type === "rusher" ? 4.0
-                   : this.type === "tank" ? 0.3 : 1.2;
-    ctx.rotate(t * rotSpeed);
+    // FIX(perf4): rotSpeed/sides now read from the same ENEMY_TYPES entry
+    // used by the constructor, instead of a second (and third) ternary
+    // chain that had to be kept in sync by hand.
+    const def = ENEMY_TYPES[this.type] || ENEMY_TYPES.normal;
+    ctx.rotate(t * def.rotSpeed);
 
-    const sides = this.type === "tank" ? 6
-                : this.type === "fast" || this.type === "rusher" ? 3
-                : this.type === "spread" ? 5
-                : this.type === "exploder" ? 4
-                : this.type === "ranged" ? 8   // octagon — reads as "technological"
-                : 4;
+    const sides = def.sides;
 
     ctx.beginPath();
     for (let i = 0; i < sides; i++) {
@@ -2646,6 +2705,289 @@ DamageNumber._pool = [];
 
 
 // =============================================================================
+// SECTION 12b — WAVE SYSTEM
+// FIX(perf3): extracted from Game to reduce monolith coupling. Owns budget-
+// based enemy spawning, boss-wave detection, and inter-wave transition
+// timing — previously spread across _spawnWave(), the WAVE_TRANSITION
+// branch of _loop(), and the wave-cleared check in _update(). Operates
+// directly on the `game` instance passed into each method (rather than
+// owning independent state) since wave/boss/timer state is read from many
+// other places in Game (HUD draw, XP/coin awards, Boss constructor) that
+// weren't part of this pass — moving that state itself would mean touching
+// every one of those call sites for no behavior change, which is out of
+// scope for a refactor pass. This is a pure extraction: no formula, timing,
+// or ordering changed from the original inline code.
+// =============================================================================
+class WaveSystem {
+  static BOSS_WAVE_INTERVAL = 5;
+
+  isBossWave(wave) {
+    return wave % WaveSystem.BOSS_WAVE_INTERVAL === 0;
+  }
+
+  /**
+   * Wave Budget System.
+   * Budget formula:  base 8 + wave * 3, capped at 60.
+   * Each enemy type has a cost and an unlock wave (see ENEMY_TABLE).
+   * We build a weighted pool of affordable, unlocked types each call, then
+   * draw from it repeatedly until the budget is exhausted.
+   */
+  spawnWave(game) {
+    const wave = game.wave;
+    // FIX(feature2): wave 1 uses the small onboarding budget instead of the
+    // normal formula (see CONFIG.ONBOARDING_WAVE1_BUDGET for rationale).
+    let budget = (wave === 1) ? CONFIG.ONBOARDING_WAVE1_BUDGET : Math.min(60, 8 + wave * 3);
+
+    // Helper: pick a spawn position on a random edge of the arena
+    // FIX(feature3): Math.random() → game.rng() so Daily Challenge mode
+    // (a seeded generator) produces the same spawn sequence every time.
+    const _edgePos = () => {
+      const side = Math.floor(game.rng() * 4);
+      return {
+        // use width-1 / height-1 so enemies never spawn one pixel outside the canvas
+        x: side === 0 ? 0 : side === 1 ? game.width  - 1 : game.rng() * game.width,
+        y: side === 2 ? 0 : side === 3 ? game.height - 1 : game.rng() * game.height,
+      };
+    };
+
+    const wf = Math.max(1, Math.log(wave + 1)) * CONFIG.WAVE_MULTIPLIER;
+
+    while (budget > 0) {
+      // Build pool of types affordable at this budget level and unlocked
+      const pool = [];
+      for (const entry of ENEMY_TABLE) {
+        if (entry.cost <= budget && entry.unlockWave <= wave) {
+          for (let w = 0; w < entry.weight; w++) pool.push(entry);
+        }
+      }
+      // Safety: if nothing fits (shouldn't happen since rusher/normal cost 1)
+      if (pool.length === 0) break;
+
+      const chosen = pool[Math.floor(game.rng() * pool.length)];
+      const pos    = _edgePos();
+      game.enemies.push(new Enemy(game, pos.x, pos.y, chosen.type, wf));
+      budget -= chosen.cost;
+    }
+  }
+
+  /**
+   * Called once per physics tick from Game._update(): checks whether the
+   * current wave is cleared and, if so, kicks off the inter-wave countdown.
+   * FIX(bug7): boss waves never spawn normal enemies, so game.kills is never
+   * incremented on boss waves (only _handleEnemyDeath does that, and it's
+   * only called for regular enemies) — the old condition
+   * `game.kills >= game.wave` could never become true on a boss wave,
+   * permanently softlocking the game after every boss kill. Boss waves now
+   * complete purely on the boss dying; normal waves keep the
+   * enemies-cleared + kills-quota condition.
+   */
+  checkWaveCleared(game) {
+    const waveCleared = game._isBossWave
+      ? !game.boss
+      : (game.enemies.length === 0 && game.kills >= game.wave);
+    if (waveCleared && game.fsm.is(GameState.PLAYING)) {
+      game.kills = 0;
+      game._waveTransitionTimer = 3.0;   // 3-second inter-wave countdown
+      // Flag boss pre-warning when the NEXT wave (wave+1) is divisible by 5
+      game._bossWarning = this.isBossWave(game.wave + 1);
+      game.fsm.transition(GameState.WAVE_TRANSITION);
+    }
+  }
+
+  /**
+   * Called once the inter-wave countdown (set by checkWaveCleared) expires:
+   * increments the wave, spawns the boss or the next budget-based wave, and
+   * periodically regenerates the arena's walls/crates.
+   */
+  advanceWave(game) {
+    game.wave++;
+    game._addShake(CONFIG.SHAKE_MAX);
+    game._isBossWave = this.isBossWave(game.wave);   // FIX(bug7): recorded per-wave
+    if (game._isBossWave) {
+      game.boss = new Boss(game);
+      game._bossWarning = false;   // clear warning now that boss has spawned
+    } else {
+      this.spawnWave(game);
+    }
+    if (game.wave % 3 === 0) game._spawnWalls();
+  }
+}
+
+
+// =============================================================================
+// SECTION 12c — COMBAT SYSTEM
+// FIX(perf3): extracted from Game to reduce monolith coupling. Owns the
+// bullet-vs-enemy/boss/wall collision block that previously ran inline in
+// _update() — the single most bullet-heavy pass in the tick. Same pattern
+// as WaveSystem: operates on the `game` instance rather than owning
+// independent state, since bullets/enemies/walls/boss are all game-level
+// collections read from many other places. Pure extraction — the one
+// incidental change is dropping a redundant enemy→index map build that was
+// always overwritten before use (see Game._update()); everything else is
+// unchanged from the original inline code.
+// =============================================================================
+class CombatSystem {
+  resolveBulletCollisions(game) {
+    // O(1) enemy→index map for _handleEnemyDeath's swap-and-pop bookkeeping
+    // inside this loop (see FIX(bug8) comment below). Built once per call,
+    // after enemy updates may have already shuffled game.enemies.
+    const enemyIndexMap = new Map();
+    for (let i = 0; i < game.enemies.length; i++) enemyIndexMap.set(game.enemies[i], i);
+
+    for (let i = 0; i < game.bullets.length; i++) {
+      const b = game.bullets[i];
+      if (!b.active) continue;
+
+      const bx0 = b.x;
+      const by0 = b.y;
+      b.update(game._FIXED_STEP);
+      game.trailMgr.push(b);
+
+      let hit = false;
+
+      const wall = game.checkWallCollision(b.x, b.y, b.size);
+      if (wall) {
+        // Only destructible walls have an hp property; crates are indestructible
+        if (wall.hp !== undefined) {
+          wall.hp -= b.damage;
+          if (wall.hp <= 0) {
+            // mark dead — compact in a single pass after the loop (avoids O(n) indexOf)
+            wall.dead = true;
+          }
+        }
+        game.spawnParticles(b.x, b.y, b.color, 5);
+        hit = true;
+      }
+
+      if (!hit) {
+        if (b.isEnemy) {
+          if (!game.player.alive) {
+            hit = true;
+          } else {
+            const t = Utils.sweepCircle(bx0, by0, b.x, b.y,
+              game.player.x, game.player.y, b.size + game.player.size);
+            if (t >= 0) {
+              if (game.player.buffs.shield <= 0) {
+                game.player.health -= b.damage;
+                game.triggerDamageFlash(1.0);
+                game.audio.playPlayerHit();
+                game._addShake(5);
+              }
+              hit = true;
+              if (game.player.health <= 0 && game.player.alive) {
+                game.player.alive = false; game.player.health = 0;
+              }
+            }
+          }
+        } else {
+          const midX = (bx0 + b.x) * 0.5;
+          const midY = (by0 + b.y) * 0.5;
+          // SpatialHash.query() now dedups boundary-straddling entities internally
+          // via its stamp mechanism, so no external Set-based dedup is needed here.
+          const candidates = game.spatialHash.query(midX, midY, b.size + 60);
+
+          for (const e of candidates) {
+            if (!e.alive) continue;
+            const t = Utils.sweepCircle(bx0, by0, b.x, b.y, e.x, e.y, b.size + e.size);
+            if (t >= 0) {
+              const isCrit  = Math.random() < game.player.critChance;
+              const dmgDealt = b.damage * (isCrit ? 2 : 1);
+              e.hp -= dmgDealt;
+              game.damageNumbers.push(DamageNumber.get(b.x, b.y, Math.ceil(dmgDealt), isCrit, false));
+              // count pierce hits; destroy bullet after MAX_PIERCE enemies
+              if (b.piercing) {
+                b.hitCount++;
+                // FIX(feature1): was a hardcoded `4` — now reads the
+                // per-bullet cap set in Player._shoot() (see Bullet.init()),
+                // so the Piercing Overload synergy can raise it for crits.
+                if (b.hitCount >= b.maxPierce) hit = true;
+              } else {
+                hit = true;
+              }
+              if (game.player.lifesteal > 0) {
+                // FIX(feature1): Vampiric Rage — lifesteal + an active rage
+                // buff doubles the heal-back on this hit.
+                const healMult = game.player.getSynergies().vampiricRage ? 2 : 1;
+                game.player.health = Math.min(
+                  game.player.maxHealth,
+                  game.player.health + b.damage * game.player.lifesteal * healMult
+                );
+              }
+              // O(1) index lookup via pre-built map
+              const ei = enemyIndexMap.get(e);
+              if (e.hp <= 0 && ei !== undefined) {
+                // FIX(bug8): enemyIndexMap was built once before the bullets
+                // loop, but _handleEnemyDeath() below does a swap-and-pop on
+                // game.enemies — the enemy that was previously last in the
+                // array is moved into slot `ei`. If a *second* bullet in this
+                // same loop later kills that moved enemy, the map still held
+                // its OLD (now stale) index. Calling removeFast() with that
+                // stale index either no-ops on an out-of-bounds slot (leaving
+                // a "dead" enemy — alive=false but never spliced out — stuck
+                // in game.enemies forever, so enemies.length never reaches 0
+                // and the wave can never clear) or, worse, evicts a totally
+                // unrelated, still-alive enemy from the array. Patch the map
+                // in lockstep with the swap so every later lookup this tick
+                // stays correct.
+                const lastIdx    = game.enemies.length - 1;
+                const movedEnemy = game.enemies[lastIdx];
+                game._handleEnemyDeath(e, ei);
+                enemyIndexMap.delete(e);
+                if (movedEnemy !== e) enemyIndexMap.set(movedEnemy, ei);
+              }
+              if (hit) break;  // stop scanning once this bullet is spent
+            }
+          }
+
+          // Also check boss as a target for player bullets
+          if (!hit && game.boss?.alive) {
+            const t = Utils.sweepCircle(bx0, by0, b.x, b.y, game.boss.x, game.boss.y, b.size + game.boss.size);
+            if (t >= 0) {
+              const dmgDealt = b.damage * 0.5; // 50 % resistance
+              game.boss.hp -= dmgDealt;
+              // add boss to seenSet so piercing bullets don't double-hit in same frame
+              game.collisionSeenSet.add(game.boss);
+              game.damageNumbers.push(DamageNumber.get(b.x, b.y, Math.ceil(dmgDealt), false, true));
+              game.spawnParticles(b.x, b.y, b.color, 4);
+              if (!b.piercing) hit = true;
+            }
+          }
+        }
+      }
+
+      if (!hit) {
+        hit = (b.x < -80 || b.x > game.width + 80 || b.y < -80 || b.y > game.height + 80);
+      }
+
+      if (hit) {
+        b.active = false;
+        game.bulletPool.release(b);
+        game.trailMgr.unregister(b);
+        game._deadBullets++;
+      }
+    }
+
+    // compact walls that were killed by bullets (dead-flag pattern)
+    if (game.walls.some(w => w.dead)) {
+      game.walls = game.walls.filter(w => !w.dead);
+      // Rebuild wallHash so destroyed walls no longer appear as candidates
+      if (game._wallHash) {
+        game._wallHash.clear();
+        const _insertRect = (r) => {
+          const cx = r.x + r.w / 2;
+          const cy = r.y + r.h / 2;
+          const sz = Math.sqrt(r.w * r.w + r.h * r.h) / 2;
+          game._wallHash.insert({ x: cx, y: cy, size: sz, _rect: r });
+        };
+        for (const w of game.walls)  _insertRect(w);
+        for (const c of game.crates) _insertRect(c);
+      }
+    }
+  }
+}
+
+
+// =============================================================================
 // SECTION 13 — GAME (Core Engine)
 // this.collisionSeenSet hoisted here — cleared each tick, never newed
 // _loop computes alpha = accumulator / FIXED_STEP, passes to _draw
@@ -2667,6 +3009,10 @@ class Game {
     this.spatialHash = new SpatialHash(80);
     this.trailMgr    = new TrailManager(10);
 
+    // FIX(perf3): extracted systems — see their class comments above.
+    this.waveSystem   = new WaveSystem();
+    this.combatSystem = new CombatSystem();
+
     this.fsm = new GameFSM();
     this._wireFSM();
 
@@ -2678,6 +3024,20 @@ class Game {
     // clock — only ever set for high-intensity events (see _addShake()).
     this.thudShake   = 0;
     this._thudTime   = 0;
+    // FIX(perf2): low-power mode reduces particle counts and glow-sprite
+    // radius (via GlowCache.padScale below) on qualifying devices only.
+    // Auto-detected once from hardwareConcurrency (cheap, synchronous,
+    // available before a single frame renders); the frame-time watchdog in
+    // _loop() can also engage it mid-session if sustained frame time creeps
+    // up on a device that reported plenty of cores. One-directional — once
+    // engaged it stays on for the session, so a momentary hitch can't cause
+    // visible flicker between quality levels. Desktop is untouched unless
+    // one of these conditions actually fires.
+    this._lowPowerMode = (navigator.hardwareConcurrency || 8) <= 4;
+    this._frameTimeWindow    = [];   // rolling ms samples for the watchdog
+    this._frameTimeWindowMax = 60;   // ~1s of samples at 60fps
+    GlowCache.padScale = this._lowPowerMode ? 0.5 : 1;
+
     this._rafId      = null;
 
     // FIX(polish2): respect prefers-reduced-motion — dampen (not eliminate,
@@ -2843,7 +3203,7 @@ class Game {
     this.fsm.transition(GameState.PLAYING);
     this.meta.initSession();   // snapshot LS once per run
     this._spawnWalls();
-    this._spawnWave();   // budget-based wave instead of N random enemies
+    this.waveSystem.spawnWave(this);   // budget-based wave instead of N random enemies
 
     this._waveTransitionTimer = 0;
 
@@ -2862,6 +3222,25 @@ class Game {
     const frameDt = Math.min((now - this.lastTime) / 1000, 0.25);
     this.lastTime = now;
 
+    // FIX(perf2): frame-time watchdog — engages low-power mode mid-session
+    // if sustained frame time creeps past ~20ms, even on hardware that
+    // passed the hardwareConcurrency check at startup (throttled laptop,
+    // background load, etc). Stops sampling once engaged — one-directional,
+    // see constructor comment.
+    if (!this._lowPowerMode) {
+      const w = this._frameTimeWindow;
+      w.push(frameDt * 1000);
+      if (w.length > this._frameTimeWindowMax) w.shift();
+      if (w.length === this._frameTimeWindowMax) {
+        let sum = 0;
+        for (const ms of w) sum += ms;
+        if (sum / w.length > 20) {
+          this._lowPowerMode  = true;
+          GlowCache.padScale  = 0.5;
+        }
+      }
+    }
+
     this._handleInputEvents();
 
     if (this.fsm.is(GameState.PLAYING)) {
@@ -2875,17 +3254,9 @@ class Game {
     if (this.fsm.is(GameState.WAVE_TRANSITION)) {
       this._waveTransitionTimer -= frameDt;
       if (this._waveTransitionTimer <= 0) {
-        // Timer expired — increment wave, spawn, resume play
-        this.wave++;
-        this._addShake(CONFIG.SHAKE_MAX);
-        this._isBossWave = (this.wave % 5 === 0);   // FIX(bug7): recorded per-wave
-        if (this._isBossWave) {
-          this.boss = new Boss(this);
-          this._bossWarning = false;   // clear warning now that boss has spawned
-        } else {
-          this._spawnWave();
-        }
-        if (this.wave % 3 === 0) this._spawnWalls();
+        // Timer expired — increment wave, spawn, resume play.
+        // See WaveSystem.advanceWave() for the full boss-wave/wall-refresh logic.
+        this.waveSystem.advanceWave(this);
         this.fsm.transition(GameState.PLAYING);
         this.lastTime = performance.now();
       }
@@ -2967,10 +3338,6 @@ class Game {
     this.spatialHash.clear();
     for (const e of this.enemies) this.spatialHash.insert(e);
 
-    // build an O(1) enemy→index map once per tick; avoids indexOf inside bullet loop
-    const enemyIndexMap = new Map();
-    for (let i = 0; i < this.enemies.length; i++) enemyIndexMap.set(this.enemies[i], i);
-
     this.player.update(dt, this.input);
 
     for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -2981,161 +3348,10 @@ class Game {
     }
 
     // Rebuild index map after enemy deaths may have shuffled the array
-    enemyIndexMap.clear();
-    for (let i = 0; i < this.enemies.length; i++) enemyIndexMap.set(this.enemies[i], i);
-
-    // ── Bullets ───────────────────────────────────────────────────────────
-    for (let i = 0; i < this.bullets.length; i++) {
-      const b = this.bullets[i];
-      if (!b.active) continue;
-
-      const bx0 = b.x;
-      const by0 = b.y;
-      b.update(dt);
-      this.trailMgr.push(b);
-
-      let hit = false;
-
-      const wall = this.checkWallCollision(b.x, b.y, b.size);
-      if (wall) {
-        // Only destructible walls have an hp property; crates are indestructible
-        if (wall.hp !== undefined) {
-          wall.hp -= b.damage;
-          if (wall.hp <= 0) {
-            // mark dead — compact in a single pass after the loop (avoids O(n) indexOf)
-            wall.dead = true;
-          }
-        }
-        this.spawnParticles(b.x, b.y, b.color, 5);
-        hit = true;
-      }
-
-      if (!hit) {
-        if (b.isEnemy) {
-          if (!this.player.alive) {
-            hit = true;
-          } else {
-            const t = Utils.sweepCircle(bx0, by0, b.x, b.y,
-              this.player.x, this.player.y, b.size + this.player.size);
-            if (t >= 0) {
-              if (this.player.buffs.shield <= 0) {
-                this.player.health -= b.damage;
-                this.triggerDamageFlash(1.0);
-                this.audio.playPlayerHit();
-                this._addShake(5);
-              }
-              hit = true;
-              if (this.player.health <= 0 && this.player.alive) {
-                this.player.alive = false; this.player.health = 0;
-              }
-            }
-          }
-        } else {
-          const midX = (bx0 + b.x) * 0.5;
-          const midY = (by0 + b.y) * 0.5;
-          // SpatialHash.query() now dedups boundary-straddling entities internally
-          // via its stamp mechanism, so no external Set-based dedup is needed here.
-          const candidates = this.spatialHash.query(midX, midY, b.size + 60);
-
-          for (const e of candidates) {
-            if (!e.alive) continue;
-            const t = Utils.sweepCircle(bx0, by0, b.x, b.y, e.x, e.y, b.size + e.size);
-            if (t >= 0) {
-              const isCrit  = Math.random() < this.player.critChance;
-              const dmgDealt = b.damage * (isCrit ? 2 : 1);
-              e.hp -= dmgDealt;
-              this.damageNumbers.push(DamageNumber.get(b.x, b.y, Math.ceil(dmgDealt), isCrit, false));
-              // count pierce hits; destroy bullet after MAX_PIERCE enemies
-              if (b.piercing) {
-                b.hitCount++;
-                // FIX(feature1): was a hardcoded `4` — now reads the
-                // per-bullet cap set in Player._shoot() (see Bullet.init()),
-                // so the Piercing Overload synergy can raise it for crits.
-                if (b.hitCount >= b.maxPierce) hit = true;
-              } else {
-                hit = true;
-              }
-              if (this.player.lifesteal > 0) {
-                // FIX(feature1): Vampiric Rage — lifesteal + an active rage
-                // buff doubles the heal-back on this hit.
-                const healMult = this.player.getSynergies().vampiricRage ? 2 : 1;
-                this.player.health = Math.min(
-                  this.player.maxHealth,
-                  this.player.health + b.damage * this.player.lifesteal * healMult
-                );
-              }
-              // O(1) index lookup via pre-built map
-              const ei = enemyIndexMap.get(e);
-              if (e.hp <= 0 && ei !== undefined) {
-                // FIX(bug8): enemyIndexMap was built once before the bullets
-                // loop, but _handleEnemyDeath() below does a swap-and-pop on
-                // this.enemies — the enemy that was previously last in the
-                // array is moved into slot `ei`. If a *second* bullet in this
-                // same loop later kills that moved enemy, the map still held
-                // its OLD (now stale) index. Calling removeFast() with that
-                // stale index either no-ops on an out-of-bounds slot (leaving
-                // a "dead" enemy — alive=false but never spliced out — stuck
-                // in this.enemies forever, so enemies.length never reaches 0
-                // and the wave can never clear) or, worse, evicts a totally
-                // unrelated, still-alive enemy from the array. Patch the map
-                // in lockstep with the swap so every later lookup this tick
-                // stays correct.
-                const lastIdx    = this.enemies.length - 1;
-                const movedEnemy = this.enemies[lastIdx];
-                this._handleEnemyDeath(e, ei);
-                enemyIndexMap.delete(e);
-                if (movedEnemy !== e) enemyIndexMap.set(movedEnemy, ei);
-              }
-              if (hit) break;  // stop scanning once this bullet is spent
-            }
-          }
-
-          // Also check boss as a target for player bullets
-          if (!hit && this.boss?.alive) {
-            const t = Utils.sweepCircle(bx0, by0, b.x, b.y, this.boss.x, this.boss.y, b.size + this.boss.size);
-            if (t >= 0) {
-              const dmgDealt = b.damage * 0.5; // 50 % resistance
-              this.boss.hp -= dmgDealt;
-              // add boss to seenSet so piercing bullets don't double-hit in same frame
-              this.collisionSeenSet.add(this.boss);
-              this.damageNumbers.push(DamageNumber.get(b.x, b.y, Math.ceil(dmgDealt), false, true));
-              this.spawnParticles(b.x, b.y, b.color, 4);
-              if (!b.piercing) hit = true;
-            }
-          }
-        }
-      }
-
-      if (!hit) {
-        hit = (b.x < -80 || b.x > this.width + 80 || b.y < -80 || b.y > this.height + 80);
-      }
-
-      if (hit) {
-        b.active = false;
-        this.bulletPool.release(b);
-        this.trailMgr.unregister(b);
-        this._deadBullets++;
-      }
-    }
-
-    // compact walls that were killed by bullets (dead-flag pattern)
-    if (this.walls.some(w => w.dead)) {
-      this.walls = this.walls.filter(w => !w.dead);
-      // Rebuild wallHash so destroyed walls no longer appear as candidates
-      if (this._wallHash) {
-        this._wallHash.clear();
-        const _insertRect = (r) => {
-          const cx = r.x + r.w / 2;
-          const cy = r.y + r.h / 2;
-          const sz = Math.sqrt(r.w * r.w + r.h * r.h) / 2;
-          this._wallHash.insert({ x: cx, y: cy, size: sz, _rect: r });
-        };
-        for (const w of this.walls)  _insertRect(w);
-        for (const c of this.crates) _insertRect(c);
-      }
-    }
-
-    // bulk-compact bullets when dead slots exceed threshold fraction
+    // (moved into CombatSystem.resolveBulletCollisions — see that class for
+    // the full bullet-vs-wall/enemy/boss collision pass, including the
+    // FIX(bug8) index-map bookkeeping and the post-loop wall compaction).
+    this.combatSystem.resolveBulletCollisions(this);
     if (this._deadBullets > 0 &&
         this._deadBullets / this.bullets.length >= CONFIG.COMPACT_THRESHOLD_BULLETS) {
       // Single linear pass — filter in place, no secondary array allocation
@@ -3203,24 +3419,9 @@ class Game {
       }
     }
 
-    // Wave progression
-    // FIX(bug7): boss waves never spawn normal enemies, so this.kills is
-    // never incremented on boss waves (only _handleEnemyDeath does that,
-    // and it's only called for regular enemies) — the old condition
-    // `this.kills >= this.wave` could never become true on a boss wave,
-    // permanently softlocking the game after every boss kill. Boss waves
-    // now complete purely on the boss dying; normal waves keep the
-    // enemies-cleared + kills-quota condition.
-    const waveCleared = this._isBossWave
-      ? !this.boss
-      : (this.enemies.length === 0 && this.kills >= this.wave);
-    if (waveCleared && this.fsm.is(GameState.PLAYING)) {
-      this.kills = 0;
-      this._waveTransitionTimer = 3.0;  // 3-second inter-wave countdown
-      // Flag boss pre-warning when the NEXT wave (wave+1) is divisible by 5
-      this._bossWarning = (this.wave + 1) % 5 === 0;
-      this.fsm.transition(GameState.WAVE_TRANSITION);
-    }
+    // Wave progression — see WaveSystem.checkWaveCleared() for the FIX(bug7)
+    // boss-wave softlock fix and full rationale.
+    this.waveSystem.checkWaveCleared(this);
 
     for (let i = this.damageNumbers.length - 1; i >= 0; i--) {
       this.damageNumbers[i].update(dt);
@@ -3469,53 +3670,8 @@ class Game {
   }
 
   // ── Spawning helpers ───────────────────────────────────────────────────────
-
-  /**
-   * Wave Budget System.
-   * Replaces the old random-float _spawnEnemy() call.
-   *
-   * Budget formula:  base 8 + wave * 3, capped at 60.
-   * Each enemy type has a cost and an unlock wave (see ENEMY_TABLE).
-   * We build a weighted pool of affordable, unlocked types each call, then
-   * draw from it repeatedly until the budget is exhausted.
-   */
-  _spawnWave() {
-    const wave   = this.wave;
-    // FIX(feature2): wave 1 uses the small onboarding budget instead of the
-    // normal formula (see CONFIG.ONBOARDING_WAVE1_BUDGET for rationale).
-    let   budget = (wave === 1) ? CONFIG.ONBOARDING_WAVE1_BUDGET : Math.min(60, 8 + wave * 3);
-
-    // Helper: pick a spawn position on a random edge of the arena
-    // FIX(feature3): Math.random() → this.rng() so Daily Challenge mode
-    // (a seeded generator) produces the same spawn sequence every time.
-    const _edgePos = () => {
-      const side = Math.floor(this.rng() * 4);
-      return {
-        // use width-1 / height-1 so enemies never spawn one pixel outside the canvas
-        x: side === 0 ? 0 : side === 1 ? this.width  - 1 : this.rng() * this.width,
-        y: side === 2 ? 0 : side === 3 ? this.height - 1 : this.rng() * this.height,
-      };
-    };
-
-    const wf = Math.max(1, Math.log(wave + 1)) * CONFIG.WAVE_MULTIPLIER;
-
-    while (budget > 0) {
-      // Build pool of types affordable at this budget level and unlocked
-      const pool = [];
-      for (const entry of ENEMY_TABLE) {
-        if (entry.cost <= budget && entry.unlockWave <= wave) {
-          for (let w = 0; w < entry.weight; w++) pool.push(entry);
-        }
-      }
-      // Safety: if nothing fits (shouldn't happen since rusher/normal cost 1)
-      if (pool.length === 0) break;
-
-      const chosen = pool[Math.floor(this.rng() * pool.length)];
-      const pos    = _edgePos();
-      this.enemies.push(new Enemy(this, pos.x, pos.y, chosen.type, wf));
-      budget -= chosen.cost;
-    }
-  }
+  // FIX(perf3): _spawnWave() moved to WaveSystem.spawnWave(game) — see that
+  // class for the wave-budget system this used to implement here.
 
   _spawnWalls() {
     this.walls   = [];
@@ -3585,8 +3741,14 @@ class Game {
   }
 
   spawnParticles(x, y, color, count = 20) {
+    // FIX(perf2): low-power devices get a reduced particle budget — the
+    // gate below (count >= 15) still checks the *requested* intensity, so
+    // low-power mode changes how many particles an event costs, not
+    // which events get the bigger ring-burst treatment.
+    const n = this._lowPowerMode ? Math.max(1, Math.round(count * 0.5)) : count;
+
     // Standard scatter
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < n; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = Math.random() * 4.5 + 0.8;
       const p     = this.particlePool.get();
@@ -3597,7 +3759,7 @@ class Game {
 
     // Ring burst only for large explosions (count >= 15); skip for small hits like wall sparks
     if (count >= 15) {
-      const shards = 12;
+      const shards = this._lowPowerMode ? 6 : 12;
       for (let i = 0; i < shards; i++) {
         const angle = (i / shards) * Math.PI * 2;
         const speed = 6.5 + Math.random() * 2.5;
