@@ -1288,6 +1288,81 @@ button:active {
   font-size: 0.85em;
 }
 
+/* ─────────────────────────────────────────────────────────────
+   FIX(feature4): Ascension mod buttons — extends .btn--upgrade with a
+   stacked title+description layout instead of the single-line label the
+   normal 7-way grid uses, since each mod needs room to explain itself.
+   ───────────────────────────────────────────────────────────── */
+.upgrade-grid--ascension {
+  grid-template-columns: 1fr;
+}
+
+.btn--ascension {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(4px * var(--ui-scale));
+  text-align: left;
+}
+
+.upgrade-title {
+  font-family: var(--font-ui);
+  font-size: calc(1rem * var(--ui-scale));
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.upgrade-desc {
+  font-family: var(--font-ui);
+  font-size: calc(0.78rem * var(--ui-scale));
+  font-weight: 400;
+  letter-spacing: 0.2px;
+  color: rgba(232, 240, 254, 0.55);
+}
+
+.btn--ascension:hover .upgrade-desc {
+  color: rgba(10, 14, 22, 0.7);   /* stays legible against the hover fill */
+}
+
+/* ─────────────────────────────────────────────────────────────
+   FIX(feature5): Daily Challenge history strip — sits under the daily
+   toggle in .start-form. Seven day-pips (last 7 days, oldest → newest)
+   plus a streak label; both driven by UIManager._renderDailyHistory().
+   ───────────────────────────────────────────────────────────── */
+.daily-history {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  min-height: calc(14px * var(--ui-scale));
+}
+
+.daily-pips {
+  display: flex;
+  gap: calc(4px * var(--ui-scale));
+}
+
+.daily-pip {
+  width: calc(8px * var(--ui-scale));
+  height: calc(8px * var(--ui-scale));
+  border-radius: 50%;
+  background: rgba(232, 240, 254, 0.12);
+  border: 1px solid rgba(232, 240, 254, 0.15);
+}
+
+.daily-pip--played {
+  background: var(--col-primary);
+  border-color: var(--col-primary);
+  box-shadow: 0 0 6px rgba(0, 229, 255, 0.6);
+}
+
+.daily-streak {
+  font-family: var(--font-ui);
+  font-size: calc(0.78rem * var(--ui-scale));
+  font-weight: 600;
+  color: var(--col-text-muted);
+}
+
 /* FIX(polish2): prefers-reduced-motion — stop purely decorative infinite
    animations (logo flicker, spinning icons) and shorten UI transitions.
    Camera shake / damage-flash dampening for canvas rendering is handled in
