@@ -46,6 +46,10 @@
           <span class="btn__label">DEPLOY</span>
           <span class="btn__glow"></span>
         </button>
+        <!-- FIX(feature6): mid-run save/resume — hidden by default, shown by
+             UIManager._updateResumeButton() when a ks_saved_run snapshot
+             exists. Sits alongside DEPLOY rather than replacing it. -->
+        <button id="resumeBtn" class="btn btn--menu hidden" aria-label="Resume Saved Run">↻ RESUME RUN</button>
         <!-- FIX(feature3): Daily Challenge toggle — read by UIManager's
              startBtn handler at deploy time; game.js derives the seeded RNG
              from today's UTC date when checked. Purely in-memory, no new
@@ -54,6 +58,9 @@
           <input type="checkbox" id="dailyModeToggle" />
           <span class="daily-toggle__label">Daily Challenge <span id="dailyDateLabel" class="daily-toggle__date"></span></span>
         </label>
+        <!-- FIX(feature5): 30-day daily-challenge history strip — populated
+             by UIManager._renderDailyHistory() from ks_daily_history. -->
+        <div id="dailyHistoryStrip" class="daily-history"></div>
       </div>
       <div id="localLeaderboard" class="leaderboard" aria-label="Local Leaderboard"></div>
     </div>
@@ -182,9 +189,30 @@
     </div>
   </div>
 
+  <!-- FIX(feature4): Ascension mod choice — replaces the normal 7-way grid
+       at levels 10/20/30. Reuses the exact same screen/glass-panel/hidden
+       pattern as #levelUpScreen; #ascensionGrid is populated dynamically by
+       UIManager.showAscensionChoice() since the 2-of-3 pair shown is
+       randomised each time. -->
+  <div
+    id="ascensionScreen"
+    class="screen screen--overlay glass-panel hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Ascension — Choose your mod"
+  >
+    <div class="screen__inner screen__inner--compact">
+      <h2 class="screen__title">ASCENSION</h2>
+      <p class="screen__subtitle">Choose your mod, soldier.</p>
+      <div id="ascensionGrid" class="upgrade-grid upgrade-grid--ascension" role="list"></div>
+    </div>
+  </div>
+
   <div id="gameOverActions" class="game-over-actions hidden">
     <p id="gameOverCoins" class="game-over-coins hidden"></p>
     <button id="restartBtn" class="btn btn--danger" aria-label="Restart Mission">↩ Play Again</button>
+    <!-- FIX(feature5): Daily Challenge runs only — toggled by showGameOver(). -->
+    <button id="copyResultBtn" class="btn btn--menu hidden" aria-label="Copy Daily Result">📋 Copy Result</button>
     <button id="menuBtn"    class="btn btn--menu"   aria-label="Return to Main Menu">⌂ Main Menu</button>
   </div>
 
