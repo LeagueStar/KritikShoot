@@ -150,6 +150,36 @@ const ENEMY_TYPES = Object.freeze({
   },
 });
 
+// =============================================================================
+// SECTION 1d — ASCENSION MODS
+// FIX(feature4): a 4th upgrade tier offered at levels 10/20/30 instead of
+// the normal 7-way grid — a 2-of-3 choice, letting the player commit to a
+// build-warping perk for a weapon (not necessarily the one currently
+// equipped). Implemented as boolean flags on player.mods, checked inline in
+// the existing per-weapon branches of _shoot() and CombatSystem's bullet-
+// collision block — the same pattern getSynergies() already uses there,
+// extended rather than duplicated.
+// =============================================================================
+const ASCENSION_LEVELS = Object.freeze([10, 20, 30]);
+
+const ASCENSION_MODS = Object.freeze([
+  {
+    id: "ricochet", weapon: "default",
+    label: "\u{1F501} Ricochet Rounds",
+    desc: "Gun bullets bounce off one wall instead of dying on contact.",
+  },
+  {
+    id: "detonatorPellets", weapon: "spread",
+    label: "\u{1F4A3} Detonator Pellets",
+    desc: "Shotgun pellets chain-explode in a small radius on enemy kill.",
+  },
+  {
+    id: "beamSplit", weapon: "laser",
+    label: "\u{1F374} Beam Split",
+    desc: "Laser bolts fork into two thinner beams on their first pierce.",
+  },
+]);
+
 const Utils = {
 
   distSq(x1, y1, x2, y2) {
@@ -911,7 +941,7 @@ class Bullet {
     this._pooled = true;   // ObjectPool.get()/release() manage this flag
   }
 
-  init(x, y, dx, dy, size, color, damage, isEnemy, piercing = false, maxPierce = 4) {
+  init(x, y, dx, dy, size, color, damage, isEnemy, piercing = false, maxPierce = 4, weaponType = "default") {
     this.x        = x;
     this.y        = y;
     this.prevX    = x;
@@ -929,6 +959,13 @@ class Bullet {
     // so a synergy (or a future upgrade) can grant a bullet extra pierces
     // without touching the collision-loop constant.
     this.maxPierce = maxPierce;
+    // FIX(feature4): which weapon fired this bullet — lets CombatSystem gate
+    // Ascension mods (Ricochet Rounds/Beam Split/Detonator Pellets) to the
+    // right weapon without re-deriving it from size/color heuristics.
+    // Irrelevant for enemy bullets (isEnemy: true), left at the default.
+    this.weaponType  = weaponType;
+    this._ricocheted = false;   // Ricochet Rounds: only bounce once per bullet
+    this._forked     = false;   // Beam Split: only fork once per bullet/child
     this.active   = true;
   }
 
@@ -1028,6 +1065,13 @@ class Player {
     this.upgrades = { speed: 0, health: 0, damage: 0, fireRate: 0, bulletSpeed: 0, critChance: 0, lifesteal: 0 };
     this.buffs    = { shield: 0, tripleShot: 0, speedBoost: 0, rage: 0 };
     this._lastShot = 0;
+
+    // FIX(feature4): Ascension mods — player-chosen, permanent flags for the
+    // run (as opposed to getSynergies(), which is auto-computed each read).
+    // See ASCENSION_MODS for the catalogue and CombatSystem/_shoot() for
+    // where each flag is actually checked.
+    this.mods = {};
+    this._ascensionLevelsSeen = new Set();
 
     // Weapon: "default" | "spread" | "laser"
     // Cycle with E or Shift; powerup "weapon_spread" / "weapon_laser" also sets it.
@@ -1160,7 +1204,7 @@ class Player {
         b.init(this.x, this.y,
           Math.cos(ang) * this.bulletSpd * (0.85 + Math.random() * 0.3),
           Math.sin(ang) * this.bulletSpd * (0.85 + Math.random() * 0.3),
-          (isCrit ? 6 : 4) * this.game.uiScale, color, dmg, false, false);
+          (isCrit ? 6 : 4) * this.game.uiScale, color, dmg, false, false, 4, "spread");
         this.game.bullets.push(b);
         this.game.trailMgr.register(b, b.color);
       }
@@ -1187,7 +1231,7 @@ class Player {
       b.init(this.x, this.y,
         Math.cos(angle) * this.bulletSpd * 1.5,
         Math.sin(angle) * this.bulletSpd * 1.5,
-        (isCrit ? 9 : 7) * this.game.uiScale, color, dmg, false, true /* piercing */, maxPierce);
+        (isCrit ? 9 : 7) * this.game.uiScale, color, dmg, false, true /* piercing */, maxPierce, "laser");
       this.game.bullets.push(b);
       this.game.trailMgr.register(b, b.color);
       return;
@@ -1207,7 +1251,7 @@ class Player {
       const size   = (isCrit ? 7 : 5) * this.game.uiScale;
 
       const b = this.game.bulletPool.get();
-      b.init(this.x, this.y, Math.cos(ang) * this.bulletSpd, Math.sin(ang) * this.bulletSpd, size, color, dmg, false);
+      b.init(this.x, this.y, Math.cos(ang) * this.bulletSpd, Math.sin(ang) * this.bulletSpd, size, color, dmg, false, false, 4, "default");
       this.game.bullets.push(b);
       this.game.trailMgr.register(b, b.color);
     }
@@ -1219,7 +1263,16 @@ class Player {
       this.stats.level++;
       this.stats.xp      -= this.stats.xpToNext;
       this.stats.xpToNext = Math.floor(this.stats.xpToNext * 1.2);
-      this.game.ui.showLevelUp();
+      // FIX(feature4): levels 10/20/30 offer a one-time Ascension mod choice
+      // instead of the normal 7-way grid. _ascensionLevelsSeen guards against
+      // re-offering the same level (e.g. if XP overflow somehow re-lands on
+      // it, or on a resumed run — see Game.resumeRun()).
+      if (ASCENSION_LEVELS.includes(this.stats.level) && !this._ascensionLevelsSeen.has(this.stats.level)) {
+        this._ascensionLevelsSeen.add(this.stats.level);
+        this.game.ui.showAscensionChoice();
+      } else {
+        this.game.ui.showLevelUp();
+      }
     }
   }
 
@@ -2129,6 +2182,7 @@ class UIManager {
     this._el = {
       startScreen:     document.getElementById("startScreen"),
       levelUp:         document.getElementById("levelUpScreen"),
+      ascension:       document.getElementById("ascensionScreen"),   // FIX(feature4)
       gameOverActions: document.getElementById("gameOverActions"),
       mobileUI:        document.getElementById("mobileControls"),
       leaderboard:     document.getElementById("localLeaderboard"),
@@ -2136,9 +2190,16 @@ class UIManager {
       instructions:    document.getElementById("instructionsScreen"), // FIX(instructions1)
     };
 
+    // FIX(feature4): non-null only while an Ascension choice is on screen —
+    // used by Game.saveRunSnapshot()/resumeRun() so a mid-choice save/reload
+    // re-shows the Ascension screen instead of the normal upgrade grid.
+    this._pendingAscension = null;
+
     this._bindUI();
     this._renderLeaderboard();
     this._renderCoinShop();
+    this._renderDailyHistory();   // FIX(feature5): daily comparative hook
+    this._updateResumeButton();   // FIX(feature6): mid-run save/resume
 
     // FIX(feature3): show today's UTC date next to the Daily Challenge
     // toggle so it's clear which day's seed a run will use.
@@ -2231,6 +2292,27 @@ class UIManager {
       });
     }
 
+    // FIX(feature6): "Resume Run" — only shown when a saved mid-run snapshot
+    // exists (see _updateResumeButton()). Sits alongside DEPLOY rather than
+    // replacing it, since the player may still want a fresh run instead.
+    const resumeBtn = document.getElementById("resumeBtn");
+    if (resumeBtn) {
+      resumeBtn.addEventListener("click", () => {
+        this._el.startScreen.classList.add("hidden");
+        this._el.coinShop?.classList.add("hidden");
+        if (this._shouldShowMobileUI()) {
+          this._el.mobileUI.classList.add("mobile-ui--active");
+          attemptLandscapeLock();
+        }
+        if (!this.game.resumeRun()) {
+          // Snapshot vanished/corrupted between page load and click (rare) —
+          // fall back to a normal fresh run instead of doing nothing.
+          this._el.startScreen.classList.remove("hidden");
+          this._updateResumeButton();
+        }
+      });
+    }
+
     const restartBtn = document.getElementById("restartBtn");
     if (restartBtn) {
       restartBtn.addEventListener("click", () => {
@@ -2259,6 +2341,26 @@ class UIManager {
       });
     }
 
+    // FIX(feature5): "Copy Result" — daily runs only (see showGameOver()),
+    // writes a short plain-text one-line summary to the clipboard, Wordle-
+    // grid style: text only, no images, no network call.
+    const copyResultBtn = document.getElementById("copyResultBtn");
+    if (copyResultBtn) {
+      copyResultBtn.addEventListener("click", () => {
+        const r = this._lastDailyResult;
+        if (!r || !navigator.clipboard?.writeText) return;
+        const mins = Math.floor(r.time / 60);
+        const secs = Math.round(r.time % 60).toString().padStart(2, "0");
+        const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${Math.round(r.time)}s`;
+        const text = `KritikShoot Daily ${r.date}\n`
+          + `\u{1F30A} Wave ${r.wave}  \u{1F480} ${r.kills} kills  \u23F1 ${timeStr}  \u{1F52B} ${r.weaponLabel}`
+          + (r.isNewBest ? "  \u2728 New best!" : "");
+        navigator.clipboard.writeText(text)
+          .then(() => this._showQuitToast("Result copied to clipboard!"))
+          .catch(() => {});
+      });
+    }
+
     document.querySelectorAll(".btn--upgrade").forEach(btn => {
       btn.addEventListener("click", e => {
         const type = e.currentTarget.dataset.type;
@@ -2270,6 +2372,14 @@ class UIManager {
         this.game.lastTime = performance.now();
       });
     });
+  }
+
+  // FIX(feature6): shows/hides the "Resume Run" button based on whether a
+  // saved mid-run snapshot exists. Called on load and after any action that
+  // creates/consumes one (start, resume, game over, quit).
+  _updateResumeButton() {
+    const btn = document.getElementById("resumeBtn");
+    if (btn) btn.classList.toggle("hidden", !this.game.hasSavedRun());
   }
 
   // Returns true if mobile controls should be shown. Checks the live isMobile
@@ -2288,6 +2398,57 @@ class UIManager {
   showLevelUp() {
     this.game.fsm.transition(GameState.LEVEL_UP);
     this._el.levelUp.classList.remove("hidden");
+  }
+
+  // FIX(feature4): Ascension mod choice — a special 2-of-3 pick that
+  // replaces the normal 7-way grid at levels 10/20/30 (see Player.addXP()).
+  // Reuses the LEVEL_UP FSM state and the same overlay show/hide pattern as
+  // showLevelUp(), just a different panel (#ascensionScreen) with buttons
+  // built dynamically since the pair shown is randomised each time.
+  showAscensionChoice() {
+    const pair = this._pickAscensionPair();
+    this._pendingAscension = pair;   // read by Game.saveRunSnapshot()/resumeRun()
+
+    const grid = this._el.ascension?.querySelector("#ascensionGrid");
+    if (grid) {
+      grid.innerHTML = "";
+      for (const mod of pair) {
+        const btn = document.createElement("button");
+        btn.className = "btn btn--upgrade btn--ascension";
+        btn.setAttribute("role", "listitem");
+        btn.dataset.modId = mod.id;
+        const title = document.createElement("span");
+        title.className   = "upgrade-title";
+        title.textContent = mod.label;
+        const desc = document.createElement("span");
+        desc.className   = "upgrade-desc";
+        desc.textContent = mod.desc;
+        btn.append(title, desc);
+        btn.addEventListener("click", () => {
+          this.game.player.mods[mod.id] = true;
+          this._pendingAscension = null;
+          this._el.ascension.classList.add("hidden");
+          this.game.fsm.transition(GameState.PLAYING);
+          this.game.lastTime = performance.now();
+        });
+        grid.appendChild(btn);
+      }
+    }
+
+    this.game.fsm.transition(GameState.LEVEL_UP);
+    this._el.ascension?.classList.remove("hidden");
+  }
+
+  // Picks 2 of the 3 ASCENSION_MODS entries at random (no replacement) —
+  // "2-of-3": the pair shown varies run to run, and covers mods for
+  // different weapons, not just the one currently equipped.
+  _pickAscensionPair() {
+    const pool = [...ASCENSION_MODS];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return pool.slice(0, 2);
   }
 
   // FIX(design2): shared by showGameOver() and quitToMenu() so both save the
@@ -2317,15 +2478,22 @@ class UIManager {
     let coinsEarned = 0;
     if (g.player) coinsEarned = this._finalizeRun();
 
+    // FIX(feature6): explicit quit ends the run — an in-progress snapshot
+    // from earlier this run is now stale, clear it.
+    g.clearSavedRun();
+    this._pendingAscension = null;
+
     this.game.fsm.transition(GameState.MENU);
     this._el.gameOverActions.classList.add("hidden");
     this._el.levelUp.classList.add("hidden");
+    this._el.ascension?.classList.add("hidden");
     this._el.mobileUI.classList.remove("mobile-ui--active");
     this._el.mobileUI.classList.remove("paused");
     const qb = document.getElementById("quitBtn");
     if (qb) qb.classList.add("hidden");
     this._renderLeaderboard();
     this._renderCoinShop();
+    this._updateResumeButton();
     this._el.startScreen.classList.remove("hidden");
 
     if (coinsEarned > 0) this._showQuitToast(`+${coinsEarned} coins earned — returning to menu`);
@@ -2387,6 +2555,100 @@ class UIManager {
       coinsEl.textContent = `+${coinsEarned} coins earned`;
       coinsEl.classList.remove("hidden");
     }
+
+    // FIX(feature5): Daily Challenge comparative hook — track today's
+    // personal best distinctly from the normal leaderboard, roll it into the
+    // 30-day history, and surface a "Copy Result" share button (daily runs
+    // only — a non-daily run's wave/time isn't comparable day to day).
+    const copyBtn = document.getElementById("copyResultBtn");
+    if (g.dailyMode) {
+      this._updateDailyResult({
+        date: g.dailySeedDate || Utils.todayUTCString(),
+        wave: g.wave, time: g.gameTime, kills: g.kills, weaponLabel,
+      });
+      copyBtn?.classList.remove("hidden");
+    } else {
+      this._lastDailyResult = null;
+      copyBtn?.classList.add("hidden");
+    }
+
+    this._updateResumeButton();   // FIX(feature6): run just ended, snapshot is gone
+  }
+
+  // FIX(feature5): writes ks_daily_best_<date> (only on a new best) and
+  // appends/updates the 30-day rolling history in ks_daily_history. Kept
+  // separate from _saveScore()/ks_scores — that's the cross-day, all-modes
+  // leaderboard; this is specifically "how am I doing on THIS day's seed".
+  _updateDailyResult(result) {
+    const key = `ks_daily_best_${result.date}`;
+    let best = null;
+    try { best = JSON.parse(localStorage.getItem(key) || "null"); } catch { best = null; }
+    const isNewBest = !best || result.wave > best.wave || (result.wave === best.wave && result.time > best.time);
+    if (isNewBest) {
+      try { localStorage.setItem(key, JSON.stringify(result)); } catch { /* best-effort */ }
+    }
+    this._lastDailyResult = { ...result, isNewBest };
+
+    let hist = [];
+    try {
+      const parsed = JSON.parse(localStorage.getItem("ks_daily_history") || "[]");
+      hist = Array.isArray(parsed) ? parsed : [];
+    } catch { hist = []; }
+    const entry = { date: result.date, wave: result.wave, time: +result.time.toFixed(1), kills: result.kills };
+    const idx = hist.findIndex(h => h.date === entry.date);
+    if (idx >= 0) {
+      // Keep the better of the two if the player played the daily more than once
+      if (entry.wave > hist[idx].wave || (entry.wave === hist[idx].wave && entry.time > hist[idx].time)) hist[idx] = entry;
+    } else {
+      hist.push(entry);
+    }
+    hist.sort((a, b) => a.date.localeCompare(b.date));
+    if (hist.length > 30) hist = hist.slice(hist.length - 30);
+    try { localStorage.setItem("ks_daily_history", JSON.stringify(hist)); } catch { /* best-effort */ }
+    this._dailyHistory = hist;
+    this._renderDailyHistory();
+  }
+
+  // Renders a compact streak/trend strip on the start screen from the
+  // 30-day rolling history — last 7 days as pips, plus a running streak
+  // count of *consecutive* days (walking back from today) with a result.
+  _renderDailyHistory() {
+    const el = document.getElementById("dailyHistoryStrip");
+    if (!el) return;
+    let hist = this._dailyHistory;
+    if (!hist) {
+      try {
+        const parsed = JSON.parse(localStorage.getItem("ks_daily_history") || "[]");
+        hist = Array.isArray(parsed) ? parsed : [];
+      } catch { hist = []; }
+      this._dailyHistory = hist;
+    }
+    if (hist.length === 0) { el.innerHTML = ""; return; }
+
+    const byDate = new Map(hist.map(h => [h.date, h]));
+    const today  = new Date(`${Utils.todayUTCString()}T00:00:00Z`);
+
+    // streak: consecutive days with a result, walking back from today
+    let streak = 0;
+    for (let i = 0; ; i++) {
+      const d = new Date(today);
+      d.setUTCDate(d.getUTCDate() - i);
+      if (!byDate.has(d.toISOString().slice(0, 10))) break;
+      streak++;
+    }
+
+    // last 7 days as small pips, oldest → newest
+    const pips = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setUTCDate(d.getUTCDate() - i);
+      const key   = d.toISOString().slice(0, 10);
+      const entry = byDate.get(key);
+      pips.push(`<span class="daily-pip${entry ? " daily-pip--played" : ""}" title="${key}${entry ? ` — wave ${entry.wave}` : ""}"></span>`);
+    }
+
+    const streakLabel = streak > 0 ? `\u{1F525} ${streak} day${streak === 1 ? "" : "s"}` : "";
+    el.innerHTML = `<div class="daily-pips">${pips.join("")}</div>${streakLabel ? `<span class="daily-streak">${streakLabel}</span>` : ""}`;
   }
 
   _saveScore(name, wave, time, level) {
@@ -2856,7 +3118,21 @@ class CombatSystem {
           }
         }
         game.spawnParticles(b.x, b.y, b.color, 5);
-        hit = true;
+        // FIX(feature4): Ricochet Rounds — a gun bullet's first wall/crate
+        // contact bounces instead of dying. Approximates the contact normal
+        // from whether the bullet's pre-move position was outside the
+        // rect's vertical span (hit a side wall → flip x) or its
+        // horizontal span (hit a top/bottom edge → flip y); good enough for
+        // a glancing "which axis did this come from" without needing exact
+        // swept-collision normals.
+        if (!b.isEnemy && b.weaponType === "default" && !b._ricocheted && game.player.mods?.ricochet) {
+          b._ricocheted = true;
+          const hitSide = bx0 < wall.x || bx0 > wall.x + wall.w;
+          if (hitSide) b.dx = -b.dx; else b.dy = -b.dy;
+          b.x = bx0; b.y = by0;   // step back so it doesn't immediately re-trigger next tick
+        } else {
+          hit = true;
+        }
       }
 
       if (!hit) {
@@ -2901,6 +3177,24 @@ class CombatSystem {
                 // per-bullet cap set in Player._shoot() (see Bullet.init()),
                 // so the Piercing Overload synergy can raise it for crits.
                 if (b.hitCount >= b.maxPierce) hit = true;
+                // FIX(feature4): Beam Split — on a laser bolt's FIRST pierce
+                // (hitCount just became 1), fork two thinner child beams off
+                // at a slight angle. _forked guards both this bullet and its
+                // children so nothing forks more than once.
+                if (b.hitCount === 1 && b.weaponType === "laser" && !b._forked && game.player.mods?.beamSplit) {
+                  b._forked = true;
+                  const baseAngle = Math.atan2(b.dy, b.dx);
+                  const speed     = Math.hypot(b.dx, b.dy);
+                  for (const off of [-0.25, 0.25]) {
+                    const ang = baseAngle + off;
+                    const fb  = game.bulletPool.get();
+                    fb.init(b.x, b.y, Math.cos(ang) * speed, Math.sin(ang) * speed,
+                      b.size * 0.6, b.color, b.damage * 0.5, false, true, b.maxPierce, "laser");
+                    fb._forked = true;   // children never fork again
+                    game.bullets.push(fb);
+                    game.trailMgr.register(fb, fb.color);
+                  }
+                }
               } else {
                 hit = true;
               }
@@ -2916,6 +3210,26 @@ class CombatSystem {
               // O(1) index lookup via pre-built map
               const ei = enemyIndexMap.get(e);
               if (e.hp <= 0 && ei !== undefined) {
+                // FIX(feature4): Detonator Pellets — a spread pellet's kill
+                // splashes flat damage to nearby enemies. Flat (not
+                // recursive) so a splash-killed enemy can't chain-trigger
+                // another detonation; those enemies are cleaned up by the
+                // ordinary hp<=0 sweep in Game._update() next tick, same as
+                // any other death, so nothing needs a second _handleEnemyDeath
+                // call here.
+                if (!b.isEnemy && b.weaponType === "spread" && game.player.mods?.detonatorPellets) {
+                  const splashR  = 70;
+                  const splashRSq = splashR * splashR;
+                  for (const other of game.spatialHash.query(e.x, e.y, splashR)) {
+                    if (other === e || !other.alive) continue;
+                    if (Utils.distSq(e.x, e.y, other.x, other.y) <= splashRSq) {
+                      const splashDmg = b.damage * 0.5;
+                      other.hp -= splashDmg;
+                      game.damageNumbers.push(DamageNumber.get(other.x, other.y, Math.ceil(splashDmg), false, false));
+                    }
+                  }
+                  game.spawnParticles(e.x, e.y, "#ff9f43", 10);
+                }
                 // FIX(bug8): enemyIndexMap was built once before the bullets
                 // loop, but _handleEnemyDeath() below does a swap-and-pop on
                 // game.enemies — the enemy that was previously last in the
@@ -3069,10 +3383,23 @@ class Game {
 
     // auto-pause when player tabs away
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden && this.fsm.is(GameState.PLAYING)) {
-        this.fsm.transition(GameState.PAUSED);
+      if (document.hidden) {
+        // FIX(feature6): save-on-hide — same trigger as auto-pause below,
+        // since "tab hidden" is exactly the moment a closed tab/refresh
+        // would otherwise lose the run. saveRunSnapshot() no-ops on its own
+        // if there's no run in progress (MENU/GAME_OVER), so this is safe
+        // to call unconditionally here.
+        this.saveRunSnapshot();
+        if (this.fsm.is(GameState.PLAYING)) {
+          this.fsm.transition(GameState.PAUSED);
+        }
       }
     });
+
+    // FIX(feature6): belt-and-suspenders for the case a tab is closed
+    // without ever firing visibilitychange first (some embedded/PWA
+    // contexts) — beforeunload is the last reliable moment to persist.
+    window.addEventListener("beforeunload", () => this.saveRunSnapshot());
 
     // auto-pause when a touch device is rotated into portrait — the
     // .rotate-prompt overlay (CSS) covers the screen at the same time,
@@ -3121,6 +3448,9 @@ class Game {
         // dimming class PAUSED uses, and clear it on exit (covers both the
         // "restart" and "menu" paths, since both go through fsm.transition).
         enter: () => {
+          // FIX(feature6): the run just ended — a saved mid-run snapshot
+          // (if any) is now stale.
+          this.clearSavedRun();
           this.ui.showGameOver();
           this.ui._el.mobileUI.classList.add("paused");
           document.getElementById("weaponBtnPC")?.classList.add("is-disabled");
@@ -3152,6 +3482,12 @@ class Game {
 
   start(options = {}) {
     cancelAnimationFrame(this._rafId);
+
+    // FIX(feature6): a fresh DEPLOY/Restart abandons any saved mid-run
+    // snapshot from a previous run — it would otherwise dangle and (if the
+    // player later hit Resume from a stale page load) restore the WRONG run.
+    this.clearSavedRun();
+    this.ui._pendingAscension = null;
 
     // Drain active entities back to pools before abandoning arrays
     if (this.bullets) {
@@ -3212,6 +3548,181 @@ class Game {
     this.setWeaponLabel("GUN");
 
     this._rafId = requestAnimationFrame(ts => this._loop(ts));
+  }
+
+  // ── Mid-run persistence (save & resume) ──────────────────────────────────
+  // FIX(feature6): a closed tab or refresh used to lose the run outright.
+  // saveRunSnapshot() is called from visibilitychange (tab hidden) and
+  // beforeunload (see the constructor); it serializes the minimum state
+  // needed to resume — player stats/upgrades/health/position, current wave,
+  // kills, gameTime, the actual wall/crate layout (serializing the literal
+  // rects rather than replaying the RNG stream, since a non-daily run's rng
+  // is Math.random and can't be seeded-replayed anyway), and active enemies
+  // (position/type/hp only, per spec). Mid-flight bullets/particles are
+  // intentionally dropped — they're a few-hundred-ms visual, not run state.
+  // Guarded with the same try/catch pattern MetaProgression.save() uses.
+
+  saveRunSnapshot() {
+    if (!this.player || !this.player.alive) return;
+    if (this.fsm.is(GameState.MENU) || this.fsm.is(GameState.GAME_OVER)) return;
+    try {
+      const p = this.player;
+      const snap = {
+        v: 1,
+        dailyMode:            this.dailyMode,
+        dailySeedDate:        this.dailySeedDate,
+        wave:                 this.wave,
+        kills:                this.kills,
+        gameTime:             this.gameTime,
+        isBossWave:           this._isBossWave,
+        bossWarning:          this._bossWarning,
+        waveTransitionTimer:  this._waveTransitionTimer,
+        fsmState:             this.fsm.state,
+        // FIX(feature6): so a save mid-LEVEL_UP knows which panel to re-show
+        pendingAscension:     !!this.ui._pendingAscension,
+        player: {
+          x: p.x, y: p.y, health: p.health, alive: p.alive,
+          stats:               { ...p.stats },
+          upgrades:            { ...p.upgrades },
+          weapon:               p.weapon,
+          weaponShots:          { ...p.weaponShots },
+          mods:                 { ...p.mods },
+          ascensionLevelsSeen:  Array.from(p._ascensionLevelsSeen),
+        },
+        walls:   this.walls.map(w => ({ x: w.x, y: w.y, w: w.w, h: w.h, hp: w.hp, maxHp: w.maxHp })),
+        crates:  this.crates.map(c => ({ x: c.x, y: c.y, w: c.w, h: c.h, isPillar: c.isPillar })),
+        enemies: this.enemies.filter(e => e.alive)
+          .map(e => ({ x: e.x, y: e.y, type: e.type, hp: e.hp, maxHp: e.maxHp })),
+        boss: (this.boss && this.boss.alive)
+          ? { x: this.boss.x, y: this.boss.y, hp: this.boss.hp, maxHp: this.boss.maxHp }
+          : null,
+      };
+      localStorage.setItem("ks_saved_run", JSON.stringify(snap));
+    } catch { /* best-effort — quota errors / private mode shouldn't break gameplay */ }
+  }
+
+  hasSavedRun() {
+    try { return !!localStorage.getItem("ks_saved_run"); } catch { return false; }
+  }
+
+  loadRunSnapshot() {
+    try {
+      const raw = localStorage.getItem("ks_saved_run");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      // FIX(bug10)-style guard: a corrupted/older-schema value shouldn't
+      // throw partway through resumeRun() with entities half-restored.
+      if (!parsed || typeof parsed !== "object") return null;
+      if (!Array.isArray(parsed.enemies) || !Array.isArray(parsed.walls) || !parsed.player) return null;
+      return parsed;
+    } catch { return null; }
+  }
+
+  clearSavedRun() {
+    try { localStorage.removeItem("ks_saved_run"); } catch { /* best-effort */ }
+  }
+
+  /**
+   * Restores a run from ks_saved_run. Returns true on success, false if
+   * there was nothing valid to resume (caller falls back to a fresh start).
+   * Mirrors start()'s reset sequence but restores saved values instead of
+   * generating fresh ones.
+   */
+  resumeRun() {
+    const snap = this.loadRunSnapshot();
+    if (!snap) return false;
+
+    cancelAnimationFrame(this._rafId);
+
+    if (this.bullets)   for (const b of this.bullets)   { b.active = false; this.bulletPool.release(b); }
+    if (this.particles) for (const p of this.particles) { p.active = false; this.particlePool.release(p); }
+
+    this.dailyMode     = !!snap.dailyMode;
+    this.dailySeedDate = snap.dailySeedDate || Utils.todayUTCString();
+    // FIX(feature6): a resumed run keeps generating NEW walls (every-3-waves
+    // refresh) with a fresh rng — the seed only ever guaranteed the
+    // INITIAL layout matched across players, and we're restoring the
+    // literal already-generated layout below rather than replaying it.
+    this.rng = this.dailyMode
+      ? Utils.createSeededRNG(`kritikshoot-daily-${this.dailySeedDate}`)
+      : Math.random;
+
+    this.player = new Player(this);
+    this.player.x       = snap.player.x;
+    this.player.y       = snap.player.y;
+    this.player.prevX   = snap.player.x;   // avoid a one-frame interpolation slide from the reset() default
+    this.player.prevY   = snap.player.y;
+    this.player.health  = snap.player.health;
+    this.player.alive   = snap.player.alive;
+    this.player.weapon  = snap.player.weapon || "default";
+    this.player.stats       = { ...snap.player.stats };
+    this.player.upgrades    = { ...this.player.upgrades, ...snap.player.upgrades };
+    this.player.weaponShots = { ...this.player.weaponShots, ...snap.player.weaponShots };
+    this.player.mods        = { ...(snap.player.mods || {}) };
+    this.player._ascensionLevelsSeen = new Set(snap.player.ascensionLevelsSeen || []);
+
+    // FIX(feature6): restore wave/kills/gameTime BEFORE constructing
+    // enemies/boss below — both read game.gameTime/game.wave in their
+    // constructors (Enemy._lastShot, Boss's maxHp formula), so this order
+    // avoids seeding them off a stale pre-resume value.
+    this.wave     = snap.wave;
+    this.kills    = snap.kills;
+    this.gameTime = snap.gameTime;
+    this._isBossWave          = !!snap.isBossWave;
+    this._bossWarning         = !!snap.bossWarning;
+    this._waveTransitionTimer = snap.waveTransitionTimer || 0;
+
+    // waveFactor is irrelevant here — hp/maxHp are overwritten from the
+    // snapshot immediately after construction.
+    this.enemies = snap.enemies.map(e => {
+      const en = new Enemy(this, e.x, e.y, e.type, 1);
+      en.hp = e.hp; en.maxHp = e.maxHp;
+      return en;
+    });
+    this.bullets   = [];
+    this.particles = [];
+    this.walls   = snap.walls.map(w => ({ ...w }));
+    this.crates  = snap.crates.map(c => ({ ...c }));
+    this._rebuildWallHash();
+
+    this.boss = null;
+    if (snap.boss) {
+      this.boss = new Boss(this);
+      this.boss.hp    = snap.boss.hp;
+      this.boss.maxHp = snap.boss.maxHp;
+      this.boss.x     = snap.boss.x;
+      this.boss.y     = snap.boss.y;
+    }
+
+    this.cameraShake = 0; this.damageFlash = 0; this._shakeTime = 0;
+    this.thudShake    = 0; this._thudTime  = 0;
+    this._accumulator = 0;
+    this.trailMgr.clear();
+    this._deadBullets = 0; this._deadParticles = 0;
+    this.damageNumbers = [];
+
+    this.setWeaponLabel({ default: "GUN", spread: "SHOTGUN", laser: "LASER" }[this.player.weapon] || "GUN");
+
+    this.clearSavedRun();   // one-shot — consumed on resume
+    this.ui._updateResumeButton();
+
+    // FIX(feature6): resume into the exact FSM state the snapshot was taken
+    // in — WAVE_TRANSITION keeps its countdown running, LEVEL_UP re-shows
+    // the pending choice (normal grid or Ascension) so it isn't silently
+    // lost. Anything else (PLAYING/PAUSED) resumes straight into PLAYING.
+    const targetState = (snap.fsmState === GameState.WAVE_TRANSITION) ? GameState.WAVE_TRANSITION
+                       : (snap.fsmState === GameState.LEVEL_UP)        ? GameState.LEVEL_UP
+                       : GameState.PLAYING;
+    this.fsm.transition(targetState);
+    this.lastTime = performance.now();
+
+    if (targetState === GameState.LEVEL_UP) {
+      if (snap.pendingAscension) this.ui.showAscensionChoice();
+      else                       this.ui.showLevelUp();
+    }
+
+    this._rafId = requestAnimationFrame(ts => this._loop(ts));
+    return true;
   }
 
   // ── Game Loop ──────────────────────────────────────────────────────────────
@@ -3727,17 +4238,26 @@ class Game {
     }
 
     // Build wallHash for broad-phase collision queries in checkWallCollision.
-    // Each rect is inserted as a pseudo-entity centred on its AABB midpoint
-    // with size = half-diagonal so the hash bucket covers the entire rect.
+    this._rebuildWallHash();
+  }
+
+  // FIX(feature6): factored out of _spawnWalls() so Game.resumeRun() can
+  // rebuild the hash for a restored wall/crate layout without duplicating
+  // this insertion logic a third time (CombatSystem's post-collision
+  // compaction already has its own copy — left alone since it's tested,
+  // Part 2 code; this one is shared between the two Part 3 call sites).
+  // Each rect is inserted as a pseudo-entity centred on its AABB midpoint
+  // with size = half-diagonal so the hash bucket covers the entire rect.
+  _rebuildWallHash() {
     this._wallHash = new SpatialHash(120);
     const _insertRect = (r) => {
-      const cx3 = r.x + r.w / 2;
-      const cy3 = r.y + r.h / 2;
-      const sz  = Math.sqrt(r.w * r.w + r.h * r.h) / 2;
-      this._wallHash.insert({ x: cx3, y: cy3, size: sz, _rect: r });
+      const cx = r.x + r.w / 2;
+      const cy = r.y + r.h / 2;
+      const sz = Math.sqrt(r.w * r.w + r.h * r.h) / 2;
+      this._wallHash.insert({ x: cx, y: cy, size: sz, _rect: r });
     };
-    for (const w of this.walls)   _insertRect(w);
-    for (const c of this.crates)  _insertRect(c);
+    for (const w of this.walls)  _insertRect(w);
+    for (const c of this.crates) _insertRect(c);
   }
 
   spawnParticles(x, y, color, count = 20) {
