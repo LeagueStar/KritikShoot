@@ -2813,6 +2813,18 @@ class UIManager {
       }
     }
 
+    // FIX(feature7): Environmental Destruction tension signal — only shown
+    // once cover has actually thinned out (below 30%), so it stays quiet
+    // and doesn't clutter the HUD for most of a run.
+    const coverPct = g.coverRemainingPct();
+    if (coverPct < 30) {
+      const pulse = 0.6 + 0.4 * Math.sin(g.gameTime * 6);
+      ctx.font      = `700 ${Math.max(11, 13 * s)}px ${CONFIG.HUD_FONT}`;
+      ctx.fillStyle = `rgba(255,45,85,${pulse})`;
+      ctx.fillText(`\u26A0 COVER ${coverPct}%`, m, buffY);
+      buffY += lh * 0.8;
+    }
+
     const state = g.fsm.state;
 
     if (state === GameState.PAUSED || state === GameState.LEVEL_UP) {
@@ -2982,9 +2994,23 @@ DamageNumber._pool = [];
 // =============================================================================
 class WaveSystem {
   static BOSS_WAVE_INTERVAL = 5;
+  // FIX(feature7): Environmental Destruction — starts past wave 10, then
+  // recurs every 3 waves (13, 16, 19, ...). Deliberately offset by one from
+  // the wall-regen cadence (wave % 3 === 0 → 12, 15, 18, ...) in
+  // advanceWave() below, so a destruction event and a full wall-regen never
+  // land on the same wave — the regen would just erase the destruction
+  // event's effect on the very wave it happened, defeating the "shrinking
+  // cover over the course of a run" pressure the mechanic is going for.
+  static ENV_DESTRUCTION_START_WAVE = 10;
+  static ENV_DESTRUCTION_INTERVAL   = 3;
 
   isBossWave(wave) {
     return wave % WaveSystem.BOSS_WAVE_INTERVAL === 0;
+  }
+
+  shouldTriggerEnvironmentalDestruction(wave) {
+    return wave > WaveSystem.ENV_DESTRUCTION_START_WAVE &&
+      (wave - WaveSystem.ENV_DESTRUCTION_START_WAVE) % WaveSystem.ENV_DESTRUCTION_INTERVAL === 0;
   }
 
   /**
@@ -3072,6 +3098,13 @@ class WaveSystem {
       this.spawnWave(game);
     }
     if (game.wave % 3 === 0) game._spawnWalls();
+    // FIX(feature7): schedule (not immediately execute) 1-2 walls/crates
+    // near the arena center for destruction — see
+    // Game.scheduleEnvironmentalDestruction() for the cracking-warning
+    // countdown this kicks off.
+    if (this.shouldTriggerEnvironmentalDestruction(game.wave)) {
+      game.scheduleEnvironmentalDestruction();
+    }
   }
 }
 
@@ -3374,6 +3407,13 @@ class Game {
     // hoisted dedup Set — reused via .clear() instead of new Set() each tick
     this.collisionSeenSet = new Set();
 
+    // FIX(feature7): Environmental Destruction — walls/crates currently
+    // mid cracking-warning countdown, and the baseline count (walls+crates
+    // right after the last full _spawnWalls()) used to compute "cover
+    // remaining %" for the HUD tension signal.
+    this._pendingDestruction = [];
+    this._coverBaseline      = 0;
+
     // dead-slot counters for threshold-based compaction
     this._deadBullets   = 0;
     this._deadParticles = 0;
@@ -3536,6 +3576,9 @@ class Game {
     this._deadBullets   = 0;
     this._deadParticles = 0;
 
+    // FIX(feature7): a fresh run has no in-flight cracking warnings
+    this._pendingDestruction = [];
+
     this.fsm.transition(GameState.PLAYING);
     this.meta.initSession();   // snapshot LS once per run
     this._spawnWalls();
@@ -3684,6 +3727,13 @@ class Game {
     this.walls   = snap.walls.map(w => ({ ...w }));
     this.crates  = snap.crates.map(c => ({ ...c }));
     this._rebuildWallHash();
+    // FIX(feature7): scheduled cracking-warnings aren't part of the
+    // snapshot (same "drop transient stuff" call as bullets/particles) — a
+    // resumed run starts with none pending. Cover-remaining % baselines
+    // itself against the restored layout, so it reads 100% right after
+    // resume rather than comparing to a stale pre-save wall count.
+    this._pendingDestruction = [];
+    this._coverBaseline      = this.walls.length + this.crates.length;
 
     this.boss = null;
     if (snap.boss) {
@@ -3934,6 +3984,10 @@ class Game {
     // boss-wave softlock fix and full rationale.
     this.waveSystem.checkWaveCleared(this);
 
+    // FIX(feature7): advances any active cracking-warning countdowns and
+    // performs the actual removal once they expire.
+    this._processEnvironmentalDestruction();
+
     for (let i = this.damageNumbers.length - 1; i >= 0; i--) {
       this.damageNumbers[i].update(dt);
       if (this.damageNumbers[i].life <= 0) {
@@ -3994,6 +4048,9 @@ class Game {
       ctx.fillRect(w.x, w.y - 9, w.w, 4);
       ctx.fillStyle = CONFIG.WALL_HP_GOOD_COLOR;
       ctx.fillRect(w.x, w.y - 9, w.w * Utils.clamp(w.hp / w.maxHp, 0, 1), 4);
+      // FIX(feature7): scripted-destruction cracking warning, drawn above
+      // the existing HP bar so the two don't overlap.
+      this._drawEnvCrackWarning(ctx, w, w.y - 16);
     }
 
     // ── Crates & Pillars (indestructible environment) ─────────────────────
@@ -4041,6 +4098,10 @@ class Game {
             ctx.beginPath(); ctx.arc(rx, ry, rv * 0.7, 0, Math.PI * 2); ctx.fill();
           }
         }
+        // FIX(feature7): crates have no existing HP bar to collide with,
+        // so the countdown bar sits right at the wall bar's usual offset.
+        if (shadowActive) { ctx.shadowBlur = 0; shadowActive = false; }
+        this._drawEnvCrackWarning(ctx, c, c.y - 9);
       }
       ctx.shadowBlur = 0;
     }
@@ -4239,6 +4300,10 @@ class Game {
 
     // Build wallHash for broad-phase collision queries in checkWallCollision.
     this._rebuildWallHash();
+    // FIX(feature7): every full regen resets the "100%" baseline that
+    // cover-remaining % is measured against — a regen is meant to feel
+    // like a fresh arena, not permanently damaged goods.
+    this._coverBaseline = this.walls.length + this.crates.length;
   }
 
   // FIX(feature6): factored out of _spawnWalls() so Game.resumeRun() can
@@ -4258,6 +4323,77 @@ class Game {
     };
     for (const w of this.walls)  _insertRect(w);
     for (const c of this.crates) _insertRect(c);
+  }
+
+  // ── Environmental Destruction (FIX(feature7)) ────────────────────────────
+  // A late-game pressure system: rather than immediately deleting cover,
+  // scheduleEnvironmentalDestruction() picks 1-2 walls/crates near the
+  // arena center and gives them a short "cracking" warning (drawn in
+  // draw()'s walls/crates loop) before _processEnvironmentalDestruction()
+  // actually removes them a tick or two later. Called from
+  // WaveSystem.advanceWave() on the cadence in
+  // WaveSystem.shouldTriggerEnvironmentalDestruction().
+
+  scheduleEnvironmentalDestruction() {
+    const cx = this.width  / 2;
+    const cy = this.height / 2;
+    // "near the arena center" — within roughly a third of the shorter
+    // dimension, so this reliably targets center cover without ever
+    // reaching out to the arena edges.
+    const radius   = Math.min(this.width, this.height) * 0.35;
+    const radiusSq = radius * radius;
+
+    const candidates = [...this.walls, ...this.crates].filter(o => {
+      if (o._envDestructAt !== undefined) return false;   // already scheduled
+      const ox = o.x + o.w / 2;
+      const oy = o.y + o.h / 2;
+      return Utils.distSq(ox, oy, cx, cy) <= radiusSq;
+    });
+    if (candidates.length === 0) return;   // nothing central left to threaten this cycle
+
+    // Fisher-Yates partial shuffle — only need the first 1-2
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = Math.floor(this.rng() * (i + 1));
+      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+    }
+    const count = Math.min(candidates.length, 1 + Math.floor(this.rng() * 2));   // 1 or 2
+    const WARN_DURATION = 1.6;   // seconds of cracking warning before it goes — within the spec's 1-2s window
+
+    for (let i = 0; i < count; i++) {
+      const target = candidates[i];
+      target._envWarnStart  = this.gameTime;
+      target._envDestructAt = this.gameTime + WARN_DURATION;
+      this._pendingDestruction.push(target);
+    }
+  }
+
+  _processEnvironmentalDestruction() {
+    if (this._pendingDestruction.length === 0) return;
+    let destroyedAny = false;
+    for (let i = this._pendingDestruction.length - 1; i >= 0; i--) {
+      const target = this._pendingDestruction[i];
+      if (this.gameTime >= target._envDestructAt) {
+        this.spawnParticles(target.x + target.w / 2, target.y + target.h / 2, "#ff2d55", 14);
+        this._addShake(6);
+        target._envDestroyed = true;
+        this._pendingDestruction.splice(i, 1);
+        destroyedAny = true;
+      }
+    }
+    if (destroyedAny) {
+      this.walls  = this.walls.filter(w => !w._envDestroyed);
+      this.crates = this.crates.filter(c => !c._envDestroyed);
+      this._rebuildWallHash();
+    }
+  }
+
+  // "Cover remaining %" — current walls+crates vs. the baseline recorded at
+  // the last full _spawnWalls() regen (see there and resumeRun()). Read by
+  // UIManager.drawHUD() to surface a tension signal once it drops low.
+  coverRemainingPct() {
+    if (!this._coverBaseline) return 100;
+    const current = this.walls.length + this.crates.length;
+    return Math.round(Utils.clamp(current / this._coverBaseline, 0, 1) * 100);
   }
 
   spawnParticles(x, y, color, count = 20) {
@@ -4289,6 +4425,31 @@ class Game {
         this.particles.push(p);
       }
     }
+  }
+
+  // FIX(feature7): shared by the walls and crates draw loops — a pulsing
+  // red tint over the body plus a countdown bar (modeled directly on the
+  // wall HP bar it's drawn alongside: same rect, same 4px height, same
+  // "background track + depleting foreground" structure, just red instead
+  // of the HP green/red pair and counting down time instead of hp).
+  _drawEnvCrackWarning(ctx, obj, barY) {
+    if (obj._envDestructAt === undefined) return;
+    const remain = obj._envDestructAt - this.gameTime;
+    if (remain <= 0) return;
+    const total = obj._envDestructAt - obj._envWarnStart;
+    const frac  = Utils.clamp(remain / total, 0, 1);
+
+    // Pulsing crack tint over the body — pulses faster as destruction nears.
+    const pulseSpeed = 8 + (1 - frac) * 10;
+    const pulse      = 0.12 + 0.14 * Math.sin(this.gameTime * pulseSpeed);
+    ctx.fillStyle = `rgba(255,45,85,${pulse})`;
+    ctx.fillRect(obj.x, obj.y, obj.w, obj.h);
+
+    // Countdown bar, depleting toward destruction.
+    ctx.fillStyle = "rgba(255,45,85,0.25)";
+    ctx.fillRect(obj.x, barY, obj.w, 4);
+    ctx.fillStyle = "#ff2d55";
+    ctx.fillRect(obj.x, barY, obj.w * frac, 4);
   }
 
   checkWallCollision(x, y, size) {
