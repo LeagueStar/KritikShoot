@@ -33,6 +33,12 @@ const CONFIG = Object.freeze({
   ONBOARDING_WAVE1_BUDGET: 4,
   ONBOARDING_HINT_DURATION: 6,   // seconds the control hint stays on screen
 
+  // FIX(feature11): hard ceiling for the ambient bed's master gain, well
+  // under typical SFX peak (playPlayerHit hits 0.5) so it always reads as
+  // "underneath" the SFX rather than competing with it, even at max
+  // intensity late in a run.
+  AMBIENT_MAX_GAIN:     0.06,
+
   SHAKE_MAX:            14,
   SHAKE_DECAY:          6.5,
   SHAKE_FREQ:           55,
@@ -609,6 +615,11 @@ class AudioEngine {
     this._ctx = null;
     try { this.muted = localStorage.getItem("ks_muted") === "true"; }
     catch { this.muted = false; }
+    // FIX(feature11): ambient bed state — separate from the one-shot SFX
+    // path above (_play() creates/discards a gain node per call; this one
+    // is long-lived so intensity/mute changes have something to act on).
+    this._ambientNodes = null;   // { gain, oscA, oscB, oscC, lfo, lfoGain } while running
+    this._ambientLevel = 0;      // 0-1, set by setAmbientIntensity()
   }
 
   _getCtx() {
@@ -642,6 +653,94 @@ class AudioEngine {
   toggleMute() {
     this.muted = !this.muted;
     try { localStorage.setItem("ks_muted", this.muted); } catch {}
+    // FIX(feature11): mute affects the ambient bed too, not just one-shot
+    // SFX — ramp instead of an instant jump, same click-avoidance reason as
+    // _play()'s ramp-to-zero.
+    if (this._ambientNodes) {
+      const ctx = this._ambientNodes.gain.context;
+      const target = this.muted ? 0 : this._ambientLevel * CONFIG.AMBIENT_MAX_GAIN;
+      this._ambientNodes.gain.gain.linearRampToValueAtTime(target, ctx.currentTime + 0.3);
+    }
+  }
+
+  // FIX(feature11): procedural ambient bed — three detuned low sine/triangle
+  // layers (a root, a fifth, and a slow sub-drone) through a single master
+  // gain, plus a slow LFO modulating that gain so it breathes instead of
+  // sitting perfectly static. Deliberately its own gain node/graph, never
+  // touching the per-shot gain nodes _play() creates, so SFX gain staging
+  // is untouched — this just sits underneath, quietly. No-op if already
+  // running or if audio is unavailable.
+  startAmbient() {
+    if (this._ambientNodes) return;
+    try {
+      const ctx = this._getCtx();
+
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(this.muted ? 0 : 0, ctx.currentTime);   // fades in via setAmbientIntensity()
+      master.connect(ctx.destination);
+
+      const mk = (freq, type, gainVal) => {
+        const osc = ctx.createOscillator();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, ctx.currentTime);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(gainVal, ctx.currentTime);
+        osc.connect(g);
+        g.connect(master);
+        osc.start(ctx.currentTime);
+        return osc;
+      };
+
+      const oscA = mk(55,    "sine",     1.0);    // root drone
+      const oscB = mk(82.5,  "sine",     0.55);    // perfect fifth above root
+      const oscC = mk(110.3, "triangle", 0.3);     // slightly detuned octave — subtle beating, never static
+
+      // Slow LFO on the master gain so the whole bed breathes (~8s cycle)
+      const lfo     = ctx.createOscillator();
+      lfo.type      = "sine";
+      lfo.frequency.setValueAtTime(1 / 8, ctx.currentTime);
+      const lfoGain = ctx.createGain();
+      lfoGain.gain.setValueAtTime(0.15, ctx.currentTime);   // depth, relative to master's own level
+      lfo.connect(lfoGain);
+      lfoGain.connect(master.gain);
+      lfo.start(ctx.currentTime);
+
+      this._ambientNodes = { gain: master, oscA, oscB, oscC, lfo, lfoGain };
+      this.setAmbientIntensity(this._ambientLevel);   // apply whatever level was last set (or 0)
+    } catch (e) { /* AudioContext unavailable */ }
+  }
+
+  // FIX(feature11): 0-1 — called by Game roughly once per wave (not every
+  // frame; a fixed low-rate control signal, not audio-rate) with a value
+  // derived from wave number / enemy density. Ramped rather than stepped so
+  // intensity changes don't click. CONFIG.AMBIENT_MAX_GAIN keeps the whole
+  // bed capped well under SFX levels even at intensity 1.
+  setAmbientIntensity(level) {
+    this._ambientLevel = Utils.clamp(level, 0, 1);
+    if (!this._ambientNodes) return;
+    const ctx    = this._ambientNodes.gain.context;
+    const target = this.muted ? 0 : this._ambientLevel * CONFIG.AMBIENT_MAX_GAIN;
+    this._ambientNodes.gain.gain.linearRampToValueAtTime(target, ctx.currentTime + 1.5);
+    // Slight brightening at higher intensity — the detuned upper layer
+    // becomes a bit more present instead of just "louder everything"
+    this._ambientNodes.oscC.detune.linearRampToValueAtTime(this._ambientLevel * 12, ctx.currentTime + 1.5);
+  }
+
+  // FIX(feature11): stop + disconnect everything — called on GAME_OVER/quit
+  // so the bed doesn't keep running under the menu/leaderboard screens.
+  stopAmbient() {
+    if (!this._ambientNodes) return;
+    const { gain, oscA, oscB, oscC, lfo } = this._ambientNodes;
+    try {
+      const ctx = gain.context;
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.4);
+      for (const osc of [oscA, oscB, oscC, lfo]) {
+        osc.stop(ctx.currentTime + 0.45);
+        osc.addEventListener("ended", () => osc.disconnect(), { once: true });
+      }
+      setTimeout(() => gain.disconnect(), 500);
+    } catch (e) { /* already stopped/disconnected */ }
+    this._ambientNodes = null;
   }
 
   // "Pew" — short square-wave chirp descending from 880 → 220 Hz
@@ -822,6 +921,34 @@ class MetaProgression {
       maxTier: 4,
       cost:    tier => 45 + tier * 20,
       bonus:   tiers => tiers * 40,
+    },
+    // FIX(feature12): progression width — these three widen build variety
+    // instead of just scaling an existing stat further (see Player getters/
+    // reset() and Game._update()'s powerup pickup check for where bonus()
+    // gets read, same wiring pattern as the five stat upgrades above).
+    {
+      id:      "startShield",
+      label:   "🛡 Starting Ward",
+      desc:    "+3s of starting shield per tier — a cushion for the opening seconds of every run",
+      maxTier: 3,
+      cost:    tier => 60 + tier * 30,
+      bonus:   tiers => tiers * 3,   // seconds of shield, applied in Player.reset()
+    },
+    {
+      id:      "pickupRadius",
+      label:   "🧲 Magnetism",
+      desc:    "+15% powerup pickup radius per tier — fewer risky detours to grab drops",
+      maxTier: 4,
+      cost:    tier => 35 + tier * 18,
+      bonus:   tiers => tiers * 0.15,   // fractional radius multiplier
+    },
+    {
+      id:      "startWeapon",
+      label:   "🔫 Loadout Swap",
+      desc:    "One-time: every run now starts with Shotgun equipped instead of the default Gun",
+      maxTier: 1,
+      cost:    () => 150,
+      bonus:   tiers => tiers,   // 0/1 flag — read as a boolean in Player.reset()
     },
   ];
 
@@ -1063,7 +1190,11 @@ class Player {
 
     this.stats    = { level: 1, xp: 0, xpToNext: 100 };
     this.upgrades = { speed: 0, health: 0, damage: 0, fireRate: 0, bulletSpeed: 0, critChance: 0, lifesteal: 0 };
-    this.buffs    = { shield: 0, tripleShot: 0, speedBoost: 0, rage: 0 };
+    // FIX(feature12): "Starting Ward" shop upgrade — begin the run with a
+    // shield charge instead of the usual 0, same buffs.shield field the
+    // in-run shield powerup already uses (see Boss dash/melee/bullet-hit
+    // code paths that all check buffs.shield > 0).
+    this.buffs    = { shield: this.game.meta.getBonus("startShield"), tripleShot: 0, speedBoost: 0, rage: 0 };
     this._lastShot = 0;
 
     // FIX(feature4): Ascension mods — player-chosen, permanent flags for the
@@ -1075,7 +1206,10 @@ class Player {
 
     // Weapon: "default" | "spread" | "laser"
     // Cycle with E or Shift; powerup "weapon_spread" / "weapon_laser" also sets it.
-    this.weapon   = "default";
+    // FIX(feature12): "Loadout Swap" shop upgrade changes the run's starting
+    // weapon from Gun to Shotgun once purchased — a structurally different
+    // opening (spread damage vs single-target), not just a bigger number.
+    this.weapon   = (this.game.meta.getBonus("startWeapon") > 0) ? "spread" : "default";
 
     this.weaponShots = { default: 0, spread: 0, laser: 0 };
 
@@ -1120,7 +1254,24 @@ class Player {
   // FIX(bug3): the nearest-enemy fallback (previously mobile-only) now also
   // covers keyboard fire before any mouse movement has happened this
   // session — reuses the exact same scan rather than duplicating it.
+  // FIX(feature9): dedicated keyboard aim. Arrow keys used to double as a
+  // second movement binding (redundant with WASD) and did nothing for aim;
+  // they're now aim-only (see update() below for the matching movement
+  // change) so keyboard-only players get real directional control instead
+  // of always landing on nearest-enemy auto-aim. Takes priority over both
+  // mouse aim and the fallback below whenever any arrow key is currently
+  // held; releasing all arrow keys hands aim back to mouse/fallback exactly
+  // as before.
   _computeAimAngle(input) {
+    if (!input.isMobile) {
+      let ax = 0, ay = 0;
+      if (input.keys["arrowup"])    ay -= 1;
+      if (input.keys["arrowdown"])  ay += 1;
+      if (input.keys["arrowleft"])  ax -= 1;
+      if (input.keys["arrowright"]) ax += 1;
+      if (ax !== 0 || ay !== 0) return Math.atan2(ay, ax);
+    }
+
     const needsFallback = (input.isMobile || !input._mouseMoved) && this.game.enemies.length > 0;
     if (needsFallback) {
       let nearestDSq = Infinity, nearest = this.game.enemies[0];
@@ -1152,10 +1303,14 @@ class Player {
       dx = input.joystickX;
       dy = input.joystickY;
     } else {
-      if (input.keys["w"] || input.keys["arrowup"])    dy -= 1;
-      if (input.keys["s"] || input.keys["arrowdown"])  dy += 1;
-      if (input.keys["a"] || input.keys["arrowleft"])  dx -= 1;
-      if (input.keys["d"] || input.keys["arrowright"]) dx += 1;
+      // FIX(feature9): arrow keys removed from movement — they're now
+      // aim-only (see _computeAimAngle() above). WASD alone still covers
+      // full 8-directional movement, so nothing is lost, and arrow keys are
+      // freed up for dedicated keyboard aim.
+      if (input.keys["w"]) dy -= 1;
+      if (input.keys["s"]) dy += 1;
+      if (input.keys["a"]) dx -= 1;
+      if (input.keys["d"]) dx += 1;
     }
 
     const len = Math.hypot(dx, dy);
@@ -1579,11 +1734,22 @@ class Enemy {
     // Dark hollow fill + neon stroke
     ctx.fillStyle   = "rgba(5,8,16,0.7)";
     ctx.fill();
+    // FIX(feature10): "Shape-Only Enemy ID" accessibility toggle — thicker
+    // base stroke plus a second high-contrast white pass on top, so the
+    // per-type polygon silhouette (sides/rotSpeed already vary by
+    // ENEMY_TYPES) reads clearly without relying on hue at all.
+    const shapeOnlyID = this.game.accessibility.shapeOnlyID;
     ctx.strokeStyle = this.color;
-    ctx.lineWidth   = 2.5;
+    ctx.lineWidth   = shapeOnlyID ? 4 : 2.5;
     ctx.shadowColor = this.color;
     ctx.shadowBlur  = 14;
     ctx.stroke();
+    if (shapeOnlyID) {
+      ctx.shadowBlur  = 0;
+      ctx.lineWidth   = 1.5;
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.stroke();
+    }
 
     // Pulsing inner energy core
     ctx.shadowBlur  = 10;
@@ -2274,6 +2440,64 @@ class UIManager {
       }
     });
 
+    // FIX(feature10): accessibility settings modal — same open/close pattern
+    // as the How-to-Play modal above (including its own Escape handler,
+    // kept separate for the same reason: neither modal is reachable once
+    // the game loop is running, so there's no competition with in-game
+    // pause's Escape handling).
+    const a11yBtn      = document.getElementById("accessibilityBtn");
+    const a11yPanel    = document.getElementById("accessibilityScreen");
+    const a11yClose    = document.getElementById("accessibilityCloseBtn");
+    const shakeSlider  = document.getElementById("shakeIntensitySlider");
+    const shakeValue   = document.getElementById("shakeIntensityValue");
+    const textOptions  = document.querySelectorAll("#textSizeOptions .a11y-option");
+    const shapeToggle  = document.getElementById("shapeOnlyToggle");
+
+    const refreshA11yControls = () => {
+      const a = this.game.accessibility;
+      if (shakeSlider) shakeSlider.value = Math.round(a.shakeIntensity * 100);
+      if (shakeValue)  shakeValue.textContent = `${Math.round(a.shakeIntensity * 100)}%`;
+      textOptions.forEach(btn => {
+        btn.classList.toggle("active", parseFloat(btn.dataset.scale) === a.textScale);
+      });
+      if (shapeToggle) shapeToggle.checked = a.shapeOnlyID;
+    };
+
+    const openA11y = () => { refreshA11yControls(); a11yPanel?.classList.remove("hidden"); };
+    const closeA11y = () => { a11yPanel?.classList.add("hidden"); };
+
+    if (a11yBtn)   a11yBtn.addEventListener("click", openA11y);
+    if (a11yClose) a11yClose.addEventListener("click", closeA11y);
+    if (a11yPanel) {
+      a11yPanel.addEventListener("click", e => { if (e.target === a11yPanel) closeA11y(); });
+    }
+    window.addEventListener("keydown", e => {
+      if (e.key === "Escape" && a11yPanel && !a11yPanel.classList.contains("hidden")) closeA11y();
+    });
+
+    if (shakeSlider) {
+      shakeSlider.addEventListener("input", () => {
+        this.game.accessibility.shakeIntensity = Utils.clamp(parseInt(shakeSlider.value, 10) / 100, 0, 1);
+        if (shakeValue) shakeValue.textContent = `${shakeSlider.value}%`;
+        this.game._saveAccessibility();
+      });
+    }
+
+    textOptions.forEach(btn => {
+      btn.addEventListener("click", () => {
+        this.game.accessibility.textScale = parseFloat(btn.dataset.scale);
+        textOptions.forEach(b => b.classList.toggle("active", b === btn));
+        this.game._saveAccessibility();
+      });
+    });
+
+    if (shapeToggle) {
+      shapeToggle.addEventListener("change", () => {
+        this.game.accessibility.shapeOnlyID = shapeToggle.checked;
+        this.game._saveAccessibility();
+      });
+    }
+
     const startBtn = document.getElementById("startBtn");
     if (startBtn) {
       startBtn.addEventListener("click", () => {
@@ -2478,6 +2702,7 @@ class UIManager {
   quitToMenu() {
     const g = this.game;
     cancelAnimationFrame(g._rafId);
+    g.audio.stopAmbient();   // FIX(feature11)
 
     // Only bank progress if a run was actually in flight (player exists).
     let coinsEarned = 0;
@@ -2738,7 +2963,11 @@ class UIManager {
   drawHUD(ctx) {
     const g  = this.game;
     const p  = g.player;
-    const s  = g.uiScale;
+    // FIX(feature10): accessibility.textScale (1/1.25/1.5) multiplies in
+    // alongside uiScale so every ctx.font in this method scales together —
+    // uiScale itself is untouched (it also drives entity/bullet sizing,
+    // which text-size accessibility shouldn't affect).
+    const s  = g.uiScale * g.accessibility.textScale;
     const m  = 20 * s;
     const lh = 28 * s;
 
@@ -3357,6 +3586,20 @@ class Game {
     this.canvas = document.getElementById("gameCanvas");
     this.ctx    = this.canvas.getContext("2d");
 
+    // FIX(feature10): accessibility settings, loaded before UIManager (its
+    // _bindUI() reads these to initialize the modal's slider/buttons/
+    // checkbox). Defensive parse follows the same try/catch + fallback
+    // pattern as MetaProgression.initSession() — a corrupt or missing
+    // ks_accessibility value just falls back to defaults rather than
+    // throwing on load.
+    this.accessibility = { shakeIntensity: 1, textScale: 1, shapeOnlyID: false };
+    try {
+      const saved = JSON.parse(localStorage.getItem("ks_accessibility") || "{}");
+      if (typeof saved.shakeIntensity === "number") this.accessibility.shakeIntensity = Utils.clamp(saved.shakeIntensity, 0, 1);
+      if (typeof saved.textScale === "number")      this.accessibility.textScale      = saved.textScale;
+      if (typeof saved.shapeOnlyID === "boolean")   this.accessibility.shapeOnlyID    = saved.shapeOnlyID;
+    } catch { /* defaults above still apply */ }
+
     this.input = new InputManager(this);   // pass game so joystick auto-fire can check FSM state
     this.audio = new AudioEngine();        // FIX: must be created BEFORE UIManager so _bindUI() can safely read this.game.audio
     this.meta  = new MetaProgression();    // FIX: must be created BEFORE UIManager — its constructor calls _renderCoinShop(), which reads this.game.meta
@@ -3586,6 +3829,7 @@ class Game {
           // (if any) is now stale.
           this.clearSavedRun();
           this.ui.showGameOver();
+          this.audio.stopAmbient();   // FIX(feature11)
           this.ui._el.mobileUI.classList.add("paused");
           document.getElementById("weaponBtnPC")?.classList.add("is-disabled");
         },
@@ -3682,7 +3926,13 @@ class Game {
 
     this.damageNumbers = [];
 
-    this.setWeaponLabel("GUN");
+    // FIX(feature12): reflects the "Loadout Swap" meta upgrade — was
+    // hardcoded to "GUN", which silently lied about the HUD/weapon-switch
+    // button label whenever a run actually started on Shotgun.
+    this.setWeaponLabel({ default: "GUN", spread: "SHOTGUN", laser: "LASER" }[this.player.weapon] || "GUN");
+
+    this.audio.startAmbient();   // FIX(feature11)
+    this.audio.setAmbientIntensity(0);   // wave 1 baseline — quietest the bed gets
 
     this._rafId = requestAnimationFrame(ts => this._loop(ts));
   }
@@ -3866,6 +4116,7 @@ class Game {
     }
 
     this._rafId = requestAnimationFrame(ts => this._loop(ts));
+    this.audio.startAmbient();   // FIX(feature11)
     return true;
   }
 
@@ -3927,6 +4178,14 @@ class Game {
         this.waveSystem.advanceWave(this._waveContext());
         this.fsm.transition(GameState.PLAYING);
         this.lastTime = performance.now();
+        // FIX(feature11): ambient bed intensity — mostly wave progress
+        // (subtle early, more present by wave ~15), with a smaller enemy-
+        // density term so an unusually crowded wave feels a touch more
+        // tense even early on. Updated once per wave, not per frame — this
+        // is a slow control signal, not audio-rate.
+        const waveLevel    = Utils.clamp(this.wave / 15, 0, 1);
+        const densityLevel = Utils.clamp(this.enemies.length / 25, 0, 1);
+        this.audio.setAmbientIntensity(waveLevel * 0.7 + densityLevel * 0.3);
       }
     }
 
@@ -4032,9 +4291,15 @@ class Game {
     }
 
     // Powerups
+    // FIX(feature12): "Magnetism" shop upgrade widens the pickup radius
+    // (fractional multiplier, default 0 = unchanged) rather than the
+    // powerup's own visual size, so drops still look the same size on
+    // screen — only the collection range grows.
+    const pickupMult = 1 + this.meta.getBonus("pickupRadius");
     for (let i = this.powerups.length - 1; i >= 0; i--) {
       const pu = this.powerups[i];
-      if (Utils.distSq(this.player.x, this.player.y, pu.x, pu.y) < (this.player.size + pu.size) ** 2) {
+      const rad = (this.player.size + pu.size) * pickupMult;
+      if (Utils.distSq(this.player.x, this.player.y, pu.x, pu.y) < rad * rad) {
         this._applyPowerup(pu.type);
         this.spawnParticles(pu.x, pu.y, pu.color, 20);
         Utils.removeFast(this.powerups, i);
@@ -4652,6 +4917,14 @@ class Game {
   // sites just pass a short duration; distinct values per event (see each
   // call site) keep hit/kill/level-up/boss-death feeling different from
   // each other without needing named patterns.
+  // FIX(feature10): persists this.accessibility — called by UIManager on
+  // every slider/button/checkbox change. Same guarded-write pattern as
+  // MetaProgression._persist().
+  _saveAccessibility() {
+    try { localStorage.setItem("ks_accessibility", JSON.stringify(this.accessibility)); }
+    catch { /* in-memory value still updated */ }
+  }
+
   _vibrate(ms) {
     if (!this.input?.isMobile) return;
     try {
@@ -4677,10 +4950,16 @@ class Game {
   // FIX(polish2): centralizes every "bump the camera shake" call site so
   // reduced-motion dampening only has to live in one place.
   // FIX(bug4): `big` also feeds the independent thud layer.
+  // FIX(feature10): accessibility.shakeIntensity (0-1, default 1) scales the
+  // result independently of the rm reduced-motion dampener above — the two
+  // multiply together rather than one overriding the other, so a player
+  // with both reduced-motion on AND shake turned down gets the combined
+  // effect instead of one setting silently winning.
   _addShake(amount, big = false) {
-    const rm = this._reducedMotion ? 0.35 : 1;
-    this.cameraShake = Math.max(this.cameraShake, amount * rm);
-    if (big) this.thudShake = Math.max(this.thudShake, amount * rm);
+    const rm     = this._reducedMotion ? 0.35 : 1;
+    const scaled = amount * rm * this.accessibility.shakeIntensity;
+    this.cameraShake = Math.max(this.cameraShake, scaled);
+    if (big) this.thudShake = Math.max(this.thudShake, scaled);
   }
 
   _applyPowerup(type) {
