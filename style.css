@@ -990,6 +990,12 @@ button:active {
   right: calc(66px * var(--ui-scale));
 }
 
+/* FIX(feature10): third button in the top-right cluster (mute / howto /
+   accessibility), same .btn--mute circle, offset further left again. */
+.btn--accessibility {
+  right: calc(114px * var(--ui-scale));
+}
+
 
 /* ─────────────────────────────────────────────────────────────
    C7. HOW-TO-PLAY MODAL
@@ -1082,6 +1088,64 @@ button:active {
   border-radius: var(--radius-sm);
   padding: 1px 6px;
   margin-right: 2px;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   C8. ACCESSIBILITY MODAL CONTROLS
+   FIX(feature10): shares .howto-section/.howto-heading/.howto-text with
+   #instructionsScreen — only the row/slider/toggle primitives below are new.
+   ───────────────────────────────────────────────────────────── */
+.a11y-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.a11y-slider {
+  flex: 1;
+  accent-color: var(--col-primary);
+}
+
+.a11y-value {
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  color: var(--col-primary);
+  min-width: 3.2em;
+  text-align: right;
+}
+
+.a11y-row--options {
+  gap: var(--space-sm);
+}
+
+.a11y-option {
+  flex: 1;
+  padding: 6px 4px;
+  font-size: 0.75rem;
+  font-family: var(--font-display);
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  background: rgba(0, 229, 255, 0.06);
+  color: var(--col-text-muted);
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+
+.a11y-option.active {
+  background: var(--col-primary);
+  color: #06121a;
+  border-color: var(--col-primary);
+}
+
+.a11y-row--toggle {
+  align-items: flex-start;
+  gap: var(--space-sm);
+  cursor: pointer;
+}
+
+.a11y-row--toggle input {
+  margin-top: 3px;
+  flex-shrink: 0;
+  accent-color: var(--col-primary);
 }
 
 
