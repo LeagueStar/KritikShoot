@@ -26,6 +26,10 @@
            buttons form a top-right cluster without disturbing the rest of
            the start-screen layout. -->
       <button id="howToPlayBtn" class="btn btn--mute btn--howto" aria-label="How to Play">?</button>
+      <!-- FIX(feature10): accessibility settings — gear icon, same
+           .btn--mute circle pattern as muteBtn/howToPlayBtn, offset further
+           left so the three form one top-right cluster. -->
+      <button id="accessibilityBtn" class="btn btn--mute btn--accessibility" aria-label="Accessibility Settings">⚙</button>
       <div class="logo-lockup">
         <span class="logo-sub">— SURVIVAL SHOOTER —</span>
         <h1 class="logo-title">KritikShoot</h1>
@@ -147,8 +151,9 @@
         <section id="howtoControlsDesktop" class="howto-section">
           <h3 class="howto-heading">Desktop Controls</h3>
           <ul class="howto-list">
-            <li><span class="howto-key">WASD</span> / <span class="howto-key">Arrows</span> — Move</li>
+            <li><span class="howto-key">WASD</span> — Move</li>
             <li><span class="howto-key">Mouse</span> — Aim</li>
+            <li><span class="howto-key">Arrows</span> — Aim (keyboard-only players; overrides mouse while held)</li>
             <li><span class="howto-key">Click</span> (hold to keep firing) — Shoot</li>
             <li><span class="howto-key">Space</span> — Shoot (toward aim, or nearest enemy)</li>
             <li><span class="howto-key">E</span> / <span class="howto-key">Shift</span> — Switch weapon</li>
@@ -189,7 +194,49 @@
     </div>
   </div>
 
-  <!-- FIX(feature4): Ascension mod choice — replaces the normal 7-way grid
+  <!-- FIX(feature10): accessibility settings modal — reuses the exact same
+       .screen + .screen--overlay + .glass-panel + .howto-inner pattern as
+       #instructionsScreen. UIManager reads/writes game.accessibility and
+       persists it to ks_accessibility on every change. -->
+  <div
+    id="accessibilityScreen"
+    class="screen screen--overlay glass-panel hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Accessibility Settings"
+  >
+    <div class="screen__inner screen__inner--compact howto-inner">
+      <button id="accessibilityCloseBtn" class="btn btn--close" aria-label="Close">✕</button>
+      <h2 class="screen__title">ACCESSIBILITY</h2>
+
+      <div class="howto-content">
+        <section class="howto-section">
+          <h3 class="howto-heading">Screen Shake</h3>
+          <div class="a11y-row">
+            <input type="range" id="shakeIntensitySlider" class="a11y-slider" min="0" max="100" step="5" value="100" aria-label="Screen shake intensity" />
+            <span id="shakeIntensityValue" class="a11y-value">100%</span>
+          </div>
+        </section>
+
+        <section class="howto-section">
+          <h3 class="howto-heading">Text Size</h3>
+          <div class="a11y-row a11y-row--options" id="textSizeOptions" role="group" aria-label="HUD text size">
+            <button type="button" class="btn a11y-option" data-scale="1">Normal</button>
+            <button type="button" class="btn a11y-option" data-scale="1.25">Large</button>
+            <button type="button" class="btn a11y-option" data-scale="1.5">X-Large</button>
+          </div>
+        </section>
+
+        <section class="howto-section">
+          <h3 class="howto-heading">Shape-Only Enemy ID</h3>
+          <label class="a11y-row a11y-row--toggle">
+            <input type="checkbox" id="shapeOnlyToggle" />
+            <span class="howto-text">Thicker, high-contrast outlines so enemy type reads from silhouette alone, not just color.</span>
+          </label>
+        </section>
+      </div>
+    </div>
+  </div> — replaces the normal 7-way grid
        at levels 10/20/30. Reuses the exact same screen/glass-panel/hidden
        pattern as #levelUpScreen; #ascensionGrid is populated dynamically by
        UIManager.showAscensionChoice() since the 2-of-3 pair shown is
