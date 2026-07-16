@@ -157,6 +157,52 @@ const ENEMY_TYPES = Object.freeze({
 });
 
 // =============================================================================
+// SECTION 1c — WEAPON TUNING
+// FIX(perf6): pulled out of Player._shoot()'s inline magic numbers so the
+// per-weapon balance knobs live in one place, same Object.freeze pattern as
+// ENEMY_TYPES above. Pure refactor — every value here is unchanged from
+// what was previously inline; only the location moved, and the explanatory
+// comments that lived next to the numbers moved with them.
+// =============================================================================
+const WEAPON_TUNING = Object.freeze({
+  spread: {
+    // Shotgun: 6 pellets in a 40° cone (spreadHalfAngle*2). Per-pellet
+    // damage is damageMult× so total spread DPS ≈ pellets * damageMult ×
+    // base ≈ 1.9× base — matching laser effective output at mid-range.
+    pellets:              6,
+    spreadHalfAngle:      0.35,   // radians
+    damageMult:           0.38,
+    critRageDamageMult:   2,      // isCrit/isRage pellets do this ×, before damageMult
+    velocitySpreadMin:    0.85,   // per-pellet velocity jitter, fraction of bulletSpd
+    velocitySpreadRange:  0.3,
+    bulletSizeNormal:     4,
+    bulletSizeCrit:       6,
+    maxPierce:            4,
+  },
+  laser: {
+    baseMultiplier:              1.4,    // damage mult when neither crit nor rage
+    critMultiplier:              1.8,    // damage mult when isCrit or isRage
+    // FIX(feature1): Overcharged Beam synergy — +8% damage per fire-rate
+    // tier past the synergy threshold, stacking with baseMultiplier/critMultiplier.
+    overchargedBeamBonusPerTier: 0.08,
+    velocityMultiplier:          1.5,    // vs base bulletSpd
+    bulletSizeNormal:            7,
+    bulletSizeCrit:               9,
+    maxPierceBase:                4,
+    // FIX(feature1): Piercing Overload synergy — a crit bolt pierces this
+    // many instead of maxPierceBase when the synergy is active.
+    maxPiercePiercingOverload:    6,
+  },
+  default: {
+    tripleShotSpreadAngle: 0.2,   // radians, each outer pellet's offset from center
+    critRageDamageMult:    2,
+    bulletSizeNormal:      5,
+    bulletSizeCrit:        7,
+    maxPierce:             4,
+  },
+});
+
+// =============================================================================
 // SECTION 1d — ASCENSION MODS
 // FIX(feature4): a 4th upgrade tier offered at levels 10/20/30 instead of
 // the normal 7-way grid — a 2-of-3 choice, letting the player commit to a
@@ -541,6 +587,79 @@ const GlowCache = {
   },
 
   clear() { this._map.clear(); },
+};
+
+
+// =============================================================================
+// SECTION 6a2 — BACKGROUND LAYER
+// FIX(polish7): subtle procedural background — a faint scrolling grid plus a
+// vignette gradient whose tint/intensity shifts with wave progress and boss
+// state. Both pieces are cached (grid tile canvas, vignette canvas) instead
+// of rebuilt every frame — same "build once, blit every frame" idea as
+// GlowCache above. A canvas radial gradient is comparatively expensive to
+// construct (evaluates every color stop); a cached canvas is one drawImage.
+// =============================================================================
+const BackgroundLayer = {
+  _gridTile:  null,   // small offscreen canvas, tiled via ctx.createPattern
+  _vignette:  null,   // { key, canvas } — rebuilt only when size/color key changes
+  _scrollX: 0, _scrollY: 0,
+
+  _buildGridTile() {
+    const size = 64;
+    const oc   = document.createElement("canvas");
+    oc.width = oc.height = size;
+    const octx = oc.getContext("2d");
+    octx.strokeStyle = "rgba(0,229,255,0.05)";
+    octx.lineWidth   = 1;
+    octx.beginPath();
+    octx.moveTo(0.5, 0);   octx.lineTo(0.5, size);
+    octx.moveTo(0, 0.5);   octx.lineTo(size, 0.5);
+    octx.stroke();
+    this._gridTile = oc;
+  },
+
+  _buildVignette(width, height, color) {
+    const oc = document.createElement("canvas");
+    oc.width = width; oc.height = height;
+    const octx = oc.getContext("2d");
+    const grad = octx.createRadialGradient(
+      width / 2, height / 2, Math.min(width, height) * 0.22,
+      width / 2, height / 2, Math.max(width, height) * 0.72,
+    );
+    grad.addColorStop(0, "rgba(0,0,0,0)");
+    grad.addColorStop(1, color);
+    octx.fillStyle = grad;
+    octx.fillRect(0, 0, width, height);
+    this._vignette = { key: `${width}x${height}:${color}`, canvas: oc };
+  },
+
+  // Drawn first, before entities and before the shake-translate — stays
+  // rock-steady under the shaking gameplay layer rather than jittering with
+  // it, which reads as depth rather than costing anything extra to compute.
+  draw(ctx, width, height, dt, waveLevel, bossActive) {
+    if (!this._gridTile) this._buildGridTile();
+
+    // Slow scroll for a faint sense of motion — cheap (a translate + one
+    // pattern fillRect), not per-tile redraw.
+    this._scrollX = (this._scrollX + dt * 6) % 64;
+    this._scrollY = (this._scrollY + dt * 3) % 64;
+    ctx.save();
+    ctx.translate(-this._scrollX, -this._scrollY);
+    ctx.fillStyle = ctx.createPattern(this._gridTile, "repeat");
+    ctx.fillRect(0, 0, width + 64, height + 64);
+    ctx.restore();
+
+    // Vignette tint: cooler/darker as waves progress, shifts to a red tint
+    // during a boss fight. Only rebuilt when the (width,height,color) key
+    // actually changes — a resize or a boss/wave-state transition — not
+    // every frame.
+    const color = bossActive
+      ? "rgba(255,45,85,0.22)"
+      : `rgba(0,10,20,${(0.35 + waveLevel * 0.25).toFixed(3)})`;
+    const key = `${width}x${height}:${color}`;
+    if (!this._vignette || this._vignette.key !== key) this._buildVignette(width, height, color);
+    ctx.drawImage(this._vignette.canvas, 0, 0);
+  },
 };
 
 
@@ -1343,23 +1462,23 @@ class Player {
 
     // ── Weapon dispatch ────────────────────────────────────────────────────
     if (this.weapon === "spread") {
-      // Shotgun: 6 pellets in a 40° cone. Per-pellet damage is 0.38× so total
-      // spread DPS ≈ 1.9× base — matching laser effective output at mid-range.
-      const PELLETS = 6;
-      const SPREAD  = 0.35; // half-angle in radians
+      // FIX(perf6): tuning values moved to WEAPON_TUNING.spread — see that
+      // block for the DPS-matching rationale.
+      const T = WEAPON_TUNING.spread;
       audio.playSpread();
-      for (let i = 0; i < PELLETS; i++) {
-        const spread = (i / (PELLETS - 1) - 0.5) * SPREAD * 2;
-        const ang    = angle + spread;
+      for (let i = 0; i < T.pellets; i++) {
+        const spreadOff = (i / (T.pellets - 1) - 0.5) * T.spreadHalfAngle * 2;
+        const ang    = angle + spreadOff;
         const isCrit = Math.random() < this.critChance;
         const isRage = this.buffs.rage > 0;
-        const dmg    = ((isRage || isCrit) ? this.damage * 2 : this.damage) * 0.38;
+        const dmg    = ((isRage || isCrit) ? this.damage * T.critRageDamageMult : this.damage) * T.damageMult;
         const color  = isCrit ? "#f1c40f" : isRage ? "#ff4757" : "#ff9f43";
+        const velMul = T.velocitySpreadMin + Math.random() * T.velocitySpreadRange;
         const b      = this.game.bulletPool.get();
         b.init(this.x, this.y,
-          Math.cos(ang) * this.bulletSpd * (0.85 + Math.random() * 0.3),
-          Math.sin(ang) * this.bulletSpd * (0.85 + Math.random() * 0.3),
-          (isCrit ? 6 : 4) * this.game.uiScale, color, dmg, false, false, 4, "spread");
+          Math.cos(ang) * this.bulletSpd * velMul,
+          Math.sin(ang) * this.bulletSpd * velMul,
+          (isCrit ? T.bulletSizeCrit : T.bulletSizeNormal) * this.game.uiScale, color, dmg, false, false, T.maxPierce, "spread");
         this.game.bullets.push(b);
         this.game.trailMgr.register(b, b.color);
       }
@@ -1367,46 +1486,47 @@ class Player {
     }
 
     if (this.weapon === "laser") {
-      // Piercing laser: one fat, fast bolt that passes through enemies
+      // FIX(perf6): tuning values moved to WEAPON_TUNING.laser.
+      const T = WEAPON_TUNING.laser;
       audio.playLaser();
       const synergy = this.getSynergies();
       const isCrit = Math.random() < this.critChance;
       const isRage = this.buffs.rage > 0;
-      let   dmg    = (isRage || isCrit) ? this.damage * 1.8 : this.damage * 1.4;
-      // FIX(feature1): Overcharged Beam — +8% damage per fire-rate tier
-      // past the synergy threshold, stacking with the laser's own bonus.
+      let   dmg    = (isRage || isCrit) ? this.damage * T.critMultiplier : this.damage * T.baseMultiplier;
+      // FIX(feature1): Overcharged Beam — see WEAPON_TUNING.laser.overchargedBeamBonusPerTier.
       if (synergy.overchargedBeam) {
-        dmg *= 1 + (this.upgrades.fireRate - Player.SYNERGY_TIER + 1) * 0.08;
+        dmg *= 1 + (this.upgrades.fireRate - Player.SYNERGY_TIER + 1) * T.overchargedBeamBonusPerTier;
       }
       const color  = "#00e5ff";
       const b      = this.game.bulletPool.get();
-      // FIX(feature1): Piercing Overload — a crit laser bolt fired with
-      // critChance heavily invested pierces 2 further than the base cap.
-      const maxPierce = (synergy.piercingOverload && isCrit) ? 6 : 4;
+      // FIX(feature1): Piercing Overload — see WEAPON_TUNING.laser.maxPiercePiercingOverload.
+      const maxPierce = (synergy.piercingOverload && isCrit) ? T.maxPiercePiercingOverload : T.maxPierceBase;
       b.init(this.x, this.y,
-        Math.cos(angle) * this.bulletSpd * 1.5,
-        Math.sin(angle) * this.bulletSpd * 1.5,
-        (isCrit ? 9 : 7) * this.game.uiScale, color, dmg, false, true /* piercing */, maxPierce, "laser");
+        Math.cos(angle) * this.bulletSpd * T.velocityMultiplier,
+        Math.sin(angle) * this.bulletSpd * T.velocityMultiplier,
+        (isCrit ? T.bulletSizeCrit : T.bulletSizeNormal) * this.game.uiScale, color, dmg, false, true /* piercing */, maxPierce, "laser");
       this.game.bullets.push(b);
       this.game.trailMgr.register(b, b.color);
       return;
     }
 
     // ── Default gun (original logic, tripleShot buff preserved) ───────────
+    // FIX(perf6): tuning values moved to WEAPON_TUNING.default.
+    const T = WEAPON_TUNING.default;
     audio.playShoot();
     const baseAngles = (this.buffs.tripleShot > 0)
-      ? [angle, angle - 0.2, angle + 0.2]
+      ? [angle, angle - T.tripleShotSpreadAngle, angle + T.tripleShotSpreadAngle]
       : [angle];
 
     for (const ang of baseAngles) {
       const isCrit = Math.random() < this.critChance;
       const isRage = this.buffs.rage > 0;
-      const dmg    = (isRage || isCrit) ? this.damage * 2 : this.damage;
+      const dmg    = (isRage || isCrit) ? this.damage * T.critRageDamageMult : this.damage;
       const color  = isCrit ? "#f1c40f" : isRage ? "#ff4757" : "#e74c3c";
-      const size   = (isCrit ? 7 : 5) * this.game.uiScale;
+      const size   = (isCrit ? T.bulletSizeCrit : T.bulletSizeNormal) * this.game.uiScale;
 
       const b = this.game.bulletPool.get();
-      b.init(this.x, this.y, Math.cos(ang) * this.bulletSpd, Math.sin(ang) * this.bulletSpd, size, color, dmg, false, false, 4, "default");
+      b.init(this.x, this.y, Math.cos(ang) * this.bulletSpd, Math.sin(ang) * this.bulletSpd, size, color, dmg, false, false, T.maxPierce, "default");
       this.game.bullets.push(b);
       this.game.trailMgr.register(b, b.color);
     }
@@ -2112,7 +2232,18 @@ class InputManager {
 
   // Re-evaluates on every read so rotating a tablet or resizing a window
   // is picked up immediately, instead of being locked in at construction time.
+  // FIX(bug13): UA sniffing + width alone (the old check) misclassifies
+  // small-screen laptops — a 1024px-wide laptop with a trackpad/mouse would
+  // read as mobile purely from width. matchMedia('(pointer: coarse)') is
+  // the primary signal now: it reflects the *actual primary input device*
+  // (a real touchscreen reports coarse; a trackpad/mouse reports fine even
+  // in a narrow window), which is what mobile-vs-desktop control layout
+  // actually depends on. 'ontouchstart' in window is a secondary touch
+  // signal for the rare browser without matchMedia support. UA + width are
+  // kept only as the last-resort fallback for that same case.
   get isMobile() {
+    if (window.matchMedia) return window.matchMedia("(pointer: coarse)").matches;
+    if ("ontouchstart" in window) return true;
     return /Mobi|Android|iPad|iPhone/i.test(navigator.userAgent) || window.innerWidth <= 1024;
   }
 
@@ -3185,27 +3316,20 @@ class DamageNumber {
     this.life -= dt;
   }
 
+  // FIX(perf7): no more ctx.save()/restore() or font/fillStyle here — those
+  // are constant within a category and now set once by the batched caller
+  // (see Game._draw()'s damageNumbers block) instead of on every instance.
+  // This only sets what actually varies per-instance: alpha and position.
   draw(ctx) {
     if (this.life <= 0) return;
-    const alpha = this.life / this.maxLife;
-    ctx.save();
-    ctx.globalAlpha  = alpha;
-    ctx.textAlign    = "center";
-    ctx.textBaseline = "middle";
+    ctx.globalAlpha = this.life / this.maxLife;
     if (this.isBoss) {
-      ctx.fillStyle = "#ff2d55";
-      ctx.font      = "bold 17px 'Rajdhani', sans-serif";
       ctx.fillText(String(this.value), this.x, this.y);
     } else if (this.isCrit) {
-      ctx.fillStyle = "#f1c40f";
-      ctx.font      = "bold 17px 'Rajdhani', sans-serif";
       ctx.fillText(`✕${this.value}`, this.x, this.y);
     } else {
-      ctx.fillStyle = "#ffffff";
-      ctx.font      = "bold 14px 'Rajdhani', sans-serif";
       ctx.fillText(String(this.value), this.x, this.y);
     }
-    ctx.restore();
   }
 }
 // Static pool must be declared after the class body
@@ -3661,6 +3785,13 @@ class Game {
     // FIX(polish5): see triggerHitStop() — counts down once per rendered
     // frame in _loop(), independent of the physics accumulator above.
     this._hitStopFrames = 0;
+
+    // FIX(polish7): boss-death "shockwave" bursts — layered radial-gradient
+    // rings, separate from the particle burst _handleEnemyDeath/boss-death
+    // already spawn. Rare (0-1 concurrent almost always) and short-lived, so
+    // unlike GlowCache these gradients are built fresh per burst rather than
+    // cached — caching machinery would cost more than it saves here.
+    this._bossDeathBursts = [];
 
     // FIX(feature8): dev perf HUD — entirely gated behind the module-level
     // DEBUG const (see top of file), not just hidden by CSS/off-by-default,
@@ -4341,6 +4472,10 @@ class Game {
         this._addShake(CONFIG.SHAKE_MAX * 2, true);   // FIX(bug4): high-intensity — thud
         this.triggerHitStop(4);   // FIX(polish5): biggest single kill in the game — full 4 frames
         this._vibrate(40);   // FIX(polish6): boss-death pulse — longest/strongest, rarest event
+        // FIX(polish7): bigger visual payoff than particles alone — see
+        // _drawBossDeathBursts() for the layered-gradient shockwave this
+        // drives, and the update loop just below for its aging/expiry.
+        this._bossDeathBursts.push({ x: this.boss.x, y: this.boss.y, age: 0, life: 0.9, color: this.boss.color });
         // Big coin bonus for killing the boss
         this.meta.awardCoins(this.wave * 3, 0);
         // FIX(bug7 review): normal enemy deaths award XP via _handleEnemyDeath
@@ -4351,6 +4486,17 @@ class Game {
         // with the boss's outsized coin bonus.
         this.player.addXP(50 + this.wave * 5);
         this.boss = null;
+      }
+    }
+
+    // FIX(polish7): age/expire boss-death bursts — unconditional (not nested
+    // inside `if (this.boss)` above) since a burst outlives the boss object
+    // that spawned it by design (boss is null'd the same tick it dies).
+    if (this._bossDeathBursts.length > 0) {
+      for (let i = this._bossDeathBursts.length - 1; i >= 0; i--) {
+        const b = this._bossDeathBursts[i];
+        b.age += dt;
+        if (b.age >= b.life) this._bossDeathBursts.splice(i, 1);
       }
     }
 
@@ -4395,6 +4541,12 @@ class Game {
 
     ctx.fillStyle = "#050810";
     ctx.fillRect(0, 0, this.width, this.height);
+
+    // FIX(polish7): procedural background — see BackgroundLayer for the
+    // grid/vignette split. Drawn here, before the shake-translate below, so
+    // it stays steady under the shaking gameplay layer.
+    const waveLevel  = Utils.clamp(this.wave / 15, 0, 1);
+    BackgroundLayer.draw(ctx, this.width, this.height, this._FIXED_STEP, waveLevel, !!this.boss);
 
     ctx.save();
 
@@ -4543,6 +4695,11 @@ class Game {
     // ── Boss ─────────────────────────────────────────────────────────────
     if (this.boss) this.boss.draw(ctx, alpha);
 
+    // FIX(polish7): boss-death shockwave bursts — drawn here (world space,
+    // still inside the shake-translated block) so they sit correctly behind
+    // the HP-bar/HUD layer but among the entities they're bursting from.
+    if (this._bossDeathBursts.length > 0) this._drawBossDeathBursts(ctx);
+
     // ── Enemy HP bars (interpolated positions) ────────────────────────────
     ctx.fillStyle = CONFIG.WALL_HP_COLOR;
     for (const e of this.enemies) {
@@ -4611,7 +4768,36 @@ class Game {
     }
 
     if (this.damageNumbers && this.damageNumbers.length > 0) {
-      for (const dn of this.damageNumbers) dn.draw(ctx);
+      // FIX(perf7): batched by category (boss/crit/normal) instead of each
+      // DamageNumber.draw() doing its own ctx.save()/restore() — save/
+      // restore snapshots the entire canvas state (transform, clip, every
+      // ctx property) on every call, when only fillStyle/font actually
+      // differ between the 3 categories and alpha is the only thing that
+      // varies per-instance. One ctx.save()/restore() pair for the whole
+      // batch instead of one per damage number; 3 short passes over a
+      // typically-small array is negligible next to that.
+      ctx.save();
+      ctx.textAlign    = "center";
+      ctx.textBaseline = "middle";
+
+      ctx.font = "bold 17px 'Rajdhani', sans-serif";
+      ctx.fillStyle = "#ff2d55";
+      for (const dn of this.damageNumbers) {
+        if (dn.life > 0 && dn.isBoss) dn.draw(ctx);
+      }
+
+      // crit shares boss's font size, different color
+      ctx.fillStyle = "#f1c40f";
+      for (const dn of this.damageNumbers) {
+        if (dn.life > 0 && !dn.isBoss && dn.isCrit) dn.draw(ctx);
+      }
+
+      ctx.font = "bold 14px 'Rajdhani', sans-serif";
+      ctx.fillStyle = "#ffffff";
+      for (const dn of this.damageNumbers) {
+        if (dn.life > 0 && !dn.isBoss && !dn.isCrit) dn.draw(ctx);
+      }
+      ctx.restore();
     }
 
     // FIX(feature8): dev perf HUD — see constructor for the DEBUG gate and
@@ -4625,6 +4811,66 @@ class Game {
   // low-power-mode state, and the live spatialHash bucket count (a cheap
   // signal for how "clumped" entities are this tick — high bucket counts
   // relative to entity counts usually means small cellSize/spread-out mobs).
+  // FIX(polish7): layered radial-gradient shockwave ring — 3 concentric
+  // gradients (outer glow, mid ring, bright core) all expanding/fading
+  // together over burst.life seconds. No WebGL, no offscreen canvas needed
+  // (unlike GlowCache these are one-offs, not reused across many entities —
+  // see constructor comment on _bossDeathBursts).
+  _drawBossDeathBursts(ctx) {
+    for (const b of this._bossDeathBursts) {
+      const t     = Utils.clamp(b.age / b.life, 0, 1);
+      const ease  = 1 - (1 - t) * (1 - t);   // ease-out — fast expand, slow settle
+      const maxR  = 220 * this.uiScale;
+      const r     = 24 * this.uiScale + ease * maxR;
+      const alpha = 1 - t;
+
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";   // additive — bright without a hard edge
+
+      // Outer soft glow
+      const gOuter = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, r);
+      gOuter.addColorStop(0,   `rgba(255,255,255,${0.10 * alpha})`);
+      gOuter.addColorStop(0.6, this._hexA(b.color, 0.18 * alpha));
+      gOuter.addColorStop(1,   "rgba(0,0,0,0)");
+      ctx.fillStyle = gOuter;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, r, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Mid ring — a thin bright band trailing just behind the outer edge
+      const ringR = r * 0.78;
+      const gRing = ctx.createRadialGradient(b.x, b.y, ringR * 0.7, b.x, b.y, ringR);
+      gRing.addColorStop(0, "rgba(0,0,0,0)");
+      gRing.addColorStop(1, this._hexA(b.color, 0.35 * alpha));
+      ctx.fillStyle = gRing;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, ringR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Bright core, only in the first fraction of the burst's life
+      if (t < 0.35) {
+        const coreAlpha = (1 - t / 0.35) * 0.8;
+        const gCore = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, 40 * this.uiScale);
+        gCore.addColorStop(0, `rgba(255,255,255,${coreAlpha})`);
+        gCore.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = gCore;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 40 * this.uiScale, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.restore();
+    }
+  }
+
+  // Small helper: "#rrggbb" + alpha -> "rgba(r,g,b,a)". Boss colors are all
+  // hex literals (see BOSS_TYPES/Boss.color), so no need to handle other
+  // CSS color formats here.
+  _hexA(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+
   _drawDebugHud(ctx) {
     let msSum = 0;
     for (const ms of this._debugFrameMs) msSum += ms;
