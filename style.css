@@ -5,14 +5,13 @@
    Fonts        : Orbitron (display) + Rajdhani (UI body)
    ============================================================= */
 
-
 /* ─────────────────────────────────────────────────────────────
    1. DESIGN TOKENS
    ───────────────────────────────────────────────────────────── */
 :root {
   --ui-scale: 1;
 
-  /* Palette */
+  
   --col-bg: #050810;
   --col-bg-mid: #0a0e1a;
   --col-glass: rgba(8, 14, 30, 0.72);
@@ -32,36 +31,35 @@
   --col-text: #e8f0fe;
   --col-text-muted: rgba(232, 240, 254, 0.5);
 
-  /* Typography */
+  
   --font-display: 'Orbitron', monospace;
   --font-ui: 'Rajdhani', sans-serif;
 
-  /* Spacing */
+  
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 16px;
   --space-lg: 28px;
   --space-xl: 48px;
 
-  /* Radii */
+  
   --radius-sm: 4px;
   --radius-md: 10px;
   --radius-lg: 18px;
   --radius-pill: 9999px;
 
-  /* Shadows / Glows — CSS only, no canvas shadowBlur */
+  
   --shadow-panel: 0 24px 64px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--col-glass-border);
   --glow-primary: 0 0 12px var(--col-primary-glow), 0 0 30px rgba(0, 229, 255, 0.2);
   --glow-accent: 0 0 12px var(--col-accent-glow), 0 0 30px rgba(255, 45, 85, 0.2);
 
-  /* Motion */
+  
   --ease-snap: cubic-bezier(0.175, 0.885, 0.32, 1.275);
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --dur-fast: 150ms;
   --dur-med: 300ms;
   --dur-slow: 500ms;
 }
-
 
 /* ─────────────────────────────────────────────────────────────
    2. RESET & BASE
@@ -107,7 +105,6 @@ body {
   border: 0;
 }
 
-
 /* ─────────────────────────────────────────────────────────────
    3. CANVAS
    ───────────────────────────────────────────────────────────── */
@@ -119,11 +116,10 @@ body {
   height: 100vh;
   z-index: 1;
   cursor: crosshair;
-  /* Prevent browser from applying its own smoothing to crisp pixel art */
+  
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
-
 
 /* ─────────────────────────────────────────────────────────────
    4. GLASSMORPHISM BASE
@@ -136,7 +132,6 @@ body {
   box-shadow: var(--shadow-panel);
   background-image: linear-gradient(135deg, var(--col-glass-shine) 0%, transparent 60%);
 }
-
 
 /* ─────────────────────────────────────────────────────────────
    5. SCREENS
@@ -177,7 +172,6 @@ body {
   gap: var(--space-md);
 }
 
-/* Level-up card — floating overlay, not full-screen */
 .screen--overlay {
   inset: unset;
   top: 50%;
@@ -212,7 +206,6 @@ body {
   letter-spacing: 1px;
 }
 
-
 /* ─────────────────────────────────────────────────────────────
    6. LOGO LOCKUP
    ───────────────────────────────────────────────────────────── */
@@ -242,8 +235,7 @@ body {
     0 0 60px rgba(0, 229, 255, 0.3),
     0 0 100px rgba(0, 229, 255, 0.1);
   animation: neon-flicker 6s ease-in-out infinite;
-  /* will-change tells the compositor to promote to its own layer,
-     preventing repaint on the rest of the DOM during the animation */
+  
   will-change: opacity;
 }
 
@@ -278,7 +270,6 @@ body {
   background: linear-gradient(90deg, transparent, var(--col-primary), transparent);
   box-shadow: 0 0 8px var(--col-primary-glow);
 }
-
 
 /* ─────────────────────────────────────────────────────────────
    7. START FORM
@@ -322,7 +313,6 @@ body {
   box-shadow: var(--glow-primary), inset 0 0 20px rgba(0, 229, 255, 0.05);
 }
 
-
 /* ─────────────────────────────────────────────────────────────
    8. BUTTONS
    ───────────────────────────────────────────────────────────── */
@@ -339,7 +329,7 @@ button {
     transform var(--dur-fast) var(--ease-snap),
     box-shadow var(--dur-med) var(--ease-out),
     background-color var(--dur-med) var(--ease-out);
-  /* Promote buttons to their own compositor layer to avoid layout thrash */
+  
   will-change: transform;
 }
 
@@ -347,7 +337,6 @@ button:active {
   transform: scale(0.94) !important;
 }
 
-/* Primary: DEPLOY */
 .btn--primary {
   padding: calc(16px * var(--ui-scale)) calc(56px * var(--ui-scale));
   font-size: calc(1.1rem * var(--ui-scale));
@@ -363,7 +352,6 @@ button:active {
   box-shadow: var(--glow-primary), 0 8px 32px rgba(0, 229, 255, 0.45);
 }
 
-/* Rotating shimmer on DEPLOY */
 .btn__glow {
   position: absolute;
   inset: -50%;
@@ -379,7 +367,6 @@ button:active {
   }
 }
 
-/* Upgrade buttons */
 .btn--upgrade {
   padding: calc(11px * var(--ui-scale)) calc(18px * var(--ui-scale));
   font-size: calc(0.95rem * var(--ui-scale));
@@ -400,7 +387,6 @@ button:active {
   transform: translateX(4px);
 }
 
-/* Danger: Play Again */
 .btn--danger {
   padding: calc(14px * var(--ui-scale)) calc(36px * var(--ui-scale));
   font-size: calc(1rem * var(--ui-scale));
@@ -418,7 +404,6 @@ button:active {
   box-shadow: var(--glow-accent), 0 8px 32px rgba(255, 45, 85, 0.4);
 }
 
-/* Main Menu */
 .btn--menu {
   padding: calc(14px * var(--ui-scale)) calc(32px * var(--ui-scale));
   font-size: calc(1rem * var(--ui-scale));
@@ -436,7 +421,6 @@ button:active {
   box-shadow: var(--glow-primary), 0 8px 32px rgba(0, 229, 255, 0.3);
 }
 
-/* Game-over action bar */
 .game-over-actions {
   position: fixed;
   bottom: calc(40px * var(--ui-scale));
@@ -454,11 +438,9 @@ button:active {
   display: none !important;
 }
 
-/* Global hidden utility */
 .hidden {
   display: none !important;
 }
-
 
 /* ─────────────────────────────────────────────────────────────
    9. UPGRADE GRID
@@ -470,11 +452,9 @@ button:active {
   width: 100%;
 }
 
-/* Last odd child spans both columns */
 .upgrade-grid>.btn--upgrade:last-child:nth-child(odd) {
   grid-column: 1 / -1;
 }
-
 
 /* ─────────────────────────────────────────────────────────────
    10. LEADERBOARD
@@ -535,7 +515,6 @@ button:active {
   font-weight: 700;
 }
 
-
 /* ─────────────────────────────────────────────────────────────
    11. MOBILE CONTROLS
    ───────────────────────────────────────────────────────────── */
@@ -551,7 +530,6 @@ button:active {
   display: block;
 }
 
-/* Joystick base */
 .joystick {
   position: absolute;
   bottom: calc(44px * var(--ui-scale));
@@ -573,7 +551,6 @@ button:active {
   box-shadow: 0 0 24px rgba(0, 229, 255, 0.35);
 }
 
-/* Joystick knob */
 .joystick__knob {
   position: absolute;
   top: 50%;
@@ -586,11 +563,10 @@ button:active {
   pointer-events: none;
   box-shadow: 0 0 12px rgba(0, 229, 255, 0.5);
   transition: width var(--dur-fast), height var(--dur-fast);
-  /* GPU layer for frequent transform updates */
+  
   will-change: transform;
 }
 
-/* FIRE button */
 .btn--shoot {
   position: absolute;
   bottom: calc(44px * var(--ui-scale));
@@ -615,7 +591,6 @@ button:active {
   box-shadow: var(--glow-accent), 0 0 32px rgba(255, 45, 85, 0.7);
 }
 
-/* Pause button */
 .btn--pause {
   position: absolute;
   top: calc(20px * var(--ui-scale));
@@ -641,7 +616,6 @@ button:active {
   box-shadow: var(--glow-primary), 0 0 32px rgba(0, 229, 255, 0.5);
 }
 
-/* Quit button — shown while paused */
 .btn--quit {
   position: absolute;
   top: calc(82px * var(--ui-scale));
@@ -666,9 +640,6 @@ button:active {
   background: rgba(255, 45, 85, 0.3);
 }
 
-/* Hover states for the touch-first control buttons — guarded so a real
-   mouse (hybrid touch+mouse devices) gets a hover cue, while touchscreens
-   never trigger a "stuck hover" after tapping. */
 @media (hover: hover) and (pointer: fine) {
   .btn--shoot:hover {
     background: rgba(255, 45, 85, 0.22);
@@ -684,9 +655,6 @@ button:active {
   }
 }
 
-/* FIX(design3): while paused, the joystick/FIRE/weapon buttons do nothing —
-   fade them out (but keep them non-interactive rather than display:none, so
-   there's no layout jump) so only resume-relevant controls stand out. */
 .mobile-ui.paused .joystick,
 .mobile-ui.paused .btn--shoot,
 .mobile-ui.paused .btn--weapon {
@@ -694,7 +662,6 @@ button:active {
   pointer-events: none;
   transition: opacity var(--dur-fast);
 }
-
 
 /* ─────────────────────────────────────────────────────────────
    12. RESPONSIVE BREAKPOINTS
@@ -754,8 +721,7 @@ button:active {
     height: 44px;
   }
 
-  /* FIX(bug4): keep weapon button clear of the canvas HUD text and the
-     pause button at the small-landscape-mobile breakpoint too */
+  
   .btn--weapon {
     top: 10px;
     right: 62px;
@@ -776,8 +742,7 @@ button:active {
     max-height: 100vh;
   }
 
-  /* FIX(instructions1): give the how-to-play content more room on short
-     landscape viewports, matching the .screen__inner treatment above. */
+  
   .howto-inner {
     max-height: 96vh;
   }
@@ -787,13 +752,8 @@ button:active {
   }
 }
 
-
 /* ─────────────────────────────────────────────────────────────
-   12b. ROTATE-TO-LANDSCAPE PROMPT
-   Hidden by default / on desktop. Shown only for touch devices
-   held in portrait, where it fully covers the canvas + UI so the
-   player can't act on a layout that isn't meant for portrait.
-   game.js pauses the sim while this is visible.
+   12b. ROTATE-TO-LANDSCAPE PROMPT — touch devices held in portrait; game.js pauses while visible
    ───────────────────────────────────────────────────────────── */
 .rotate-prompt {
   display: none;
@@ -834,7 +794,6 @@ button:active {
   }
 }
 
-
 /* ─────────────────────────────────────────────────────────────
    13. SCROLLBAR (Firefox)
    ───────────────────────────────────────────────────────────── */
@@ -842,7 +801,6 @@ button:active {
   scrollbar-width: thin;
   scrollbar-color: var(--col-primary) transparent;
 }
-
 
 /* ─────────────────────────────────────────────────────────────
    14. PRINT SUPPRESSION
@@ -852,7 +810,6 @@ button:active {
     display: none;
   }
 }
-
 
 /* ── Coin Shop ─────────────────────────────────────────────────────────── */
 .coin-shop {
@@ -941,7 +898,6 @@ button:active {
 .btn--shop-poor { background: rgba(255,255,255,0.05); color: rgba(232,240,254,0.3); border: 1px solid rgba(255,255,255,0.1); cursor: not-allowed; }
 .btn--shop-maxed { background: rgba(46,204,113,0.12); color: var(--col-success); border: 1px solid rgba(46,204,113,0.35); cursor: default; }
 
-/* Coin award notice on game over */
 .game-over-coins {
   font-family: var(--font-ui);
   font-size: 1.1rem;
@@ -951,7 +907,6 @@ button:active {
   margin-bottom: 0.5rem;
   letter-spacing: 0.04em;
 }
-
 
 /* ─────────────────────────────────────────────────────────────
    C5. MUTE BUTTON — top-right inside start screen panel
@@ -982,26 +937,18 @@ button:active {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   C6. HOW-TO-PLAY BUTTON — reuses .btn--mute's circle styling;
-   only the horizontal offset changes so it sits just to the left
-   of #muteBtn instead of overlapping it. See index.html for markup.
+   C6. HOW-TO-PLAY BUTTON — reuses .btn--mute's circle styling
    ───────────────────────────────────────────────────────────── */
 .btn--howto {
   right: calc(66px * var(--ui-scale));
 }
 
-/* FIX(feature10): third button in the top-right cluster (mute / howto /
-   accessibility), same .btn--mute circle, offset further left again. */
 .btn--accessibility {
   right: calc(114px * var(--ui-scale));
 }
 
-
 /* ─────────────────────────────────────────────────────────────
    C7. HOW-TO-PLAY MODAL
-   FIX(instructions1): built on top of .screen / .screen--overlay /
-   .glass-panel (same overlay + scale-in transition #levelUpScreen
-   already uses) — only the classes below are new.
    ───────────────────────────────────────────────────────────── */
 .howto-inner {
   position: relative;
@@ -1092,8 +1039,6 @@ button:active {
 
 /* ─────────────────────────────────────────────────────────────
    C8. ACCESSIBILITY MODAL CONTROLS
-   FIX(feature10): shares .howto-section/.howto-heading/.howto-text with
-   #instructionsScreen — only the row/slider/toggle primitives below are new.
    ───────────────────────────────────────────────────────────── */
 .a11y-row {
   display: flex;
@@ -1148,14 +1093,8 @@ button:active {
   accent-color: var(--col-primary);
 }
 
-
 /* ─────────────────────────────────────────────────────────────
    C3. WEAPON SWITCH BUTTON — top-right mobile UI
-   FIX(bug4/design1): was pinned to top-left (20px/20px), the exact
-   corner drawHUD() uses for the "WAVE / KILLS / ENEMIES" line
-   (m = 20 * uiScale), so it visually collided with the canvas HUD.
-   Moved to the top-right cluster, to the left of the pause button,
-   so it never overlaps canvas-drawn text at any uiScale/viewport.
    ───────────────────────────────────────────────────────────── */
 .btn--weapon {
   position: absolute;
@@ -1183,9 +1122,6 @@ button:active {
   background: rgba(0, 229, 255, 0.28);
 }
 
-/* Dimmed while PAUSED — mirrors the old `.mobile-ui.paused .btn--weapon`
-   rule, applied directly since weaponBtn/weaponBtnPC are no longer both
-   guaranteed to be descendants of `.mobile-ui` (see C3-PC below). */
 .btn--weapon.is-disabled,
 .btn--weapon-pc.is-disabled {
   opacity: 0.25;
@@ -1193,14 +1129,8 @@ button:active {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   C3-PC. DESKTOP WEAPON-SWITCH BUTTON
-   Lives outside #mobileControls so it is never subject to that
-   panel's touch-only "mobile-ui--active" activation. Visibility is
-   handled purely by media query (hover:hover + pointer:fine == a
-   real mouse), so touch devices never see or receive this element —
-   #mobileControls and its own #weaponBtn are completely untouched.
-   Positioned top-right to match the mobile weapon button's spot,
-   clear of the canvas-drawn WAVE/KILLS HUD line (top-left).
+   C3-PC. DESKTOP WEAPON-SWITCH BUTTON — shown only via (hover:hover)
+   and (pointer:fine), so touch devices never see it
    ───────────────────────────────────────────────────────────── */
 .btn--weapon-pc {
   display: none;
@@ -1239,7 +1169,6 @@ button:active {
 .btn--weapon-pc:active {
   background: rgba(0, 229, 255, 0.32);
 }
-
 
 /* ─────────────────────────────────────────────────────────────
    C4. RUN SUMMARY — injected into #gameOverActions on game over
@@ -1283,11 +1212,8 @@ button:active {
   letter-spacing: 1px;
 }
 
-
 /* ─────────────────────────────────────────────────────────────
-   C6. QUIT TOAST — FIX(design2): lightweight confirmation shown
-   when quitting mid-run with progress banked ("+N coins earned").
-   Single reused node, appended to <body> by UIManager._showQuitToast().
+   C6. QUIT TOAST
    ───────────────────────────────────────────────────────────── */
 .quit-toast {
   position: fixed;
@@ -1317,9 +1243,7 @@ button:active {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   FIX(feature3): Daily Challenge toggle — sits under #startBtn in
-   .start-form, reuses the same design tokens as .input-field/buttons
-   rather than introducing new colors.
+   DAILY CHALLENGE TOGGLE
    ───────────────────────────────────────────────────────────── */
 .daily-toggle {
   display: flex;
@@ -1353,9 +1277,7 @@ button:active {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   FIX(feature4): Ascension mod buttons — extends .btn--upgrade with a
-   stacked title+description layout instead of the single-line label the
-   normal 7-way grid uses, since each mod needs room to explain itself.
+   ASCENSION MOD BUTTONS
    ───────────────────────────────────────────────────────────── */
 .upgrade-grid--ascension {
   grid-template-columns: 1fr;
@@ -1385,13 +1307,11 @@ button:active {
 }
 
 .btn--ascension:hover .upgrade-desc {
-  color: rgba(10, 14, 22, 0.7);   /* stays legible against the hover fill */
+  color: rgba(10, 14, 22, 0.7);   
 }
 
 /* ─────────────────────────────────────────────────────────────
-   FIX(feature5): Daily Challenge history strip — sits under the daily
-   toggle in .start-form. Seven day-pips (last 7 days, oldest → newest)
-   plus a streak label; both driven by UIManager._renderDailyHistory().
+   DAILY CHALLENGE HISTORY STRIP
    ───────────────────────────────────────────────────────────── */
 .daily-history {
   display: flex;
@@ -1427,10 +1347,6 @@ button:active {
   color: var(--col-text-muted);
 }
 
-/* FIX(polish2): prefers-reduced-motion — stop purely decorative infinite
-   animations (logo flicker, spinning icons) and shorten UI transitions.
-   Camera shake / damage-flash dampening for canvas rendering is handled in
-   game.js (Game._reducedMotion), since those are drawn on <canvas>, not CSS. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.001ms !important;
