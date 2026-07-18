@@ -663,6 +663,17 @@ button:active {
   transition: opacity var(--dur-fast);
 }
 
+/* FIX(ui2): GAME_OVER previously only added the same .paused dimming class,
+   so the joystick/fire/weapon buttons kept rendering (at reduced opacity)
+   underneath the death screen's run-summary panel. On GAME_OVER they should
+   be fully removed instead, since there's nothing left to control. */
+.mobile-ui.game-over .joystick,
+.mobile-ui.game-over .btn--shoot,
+.mobile-ui.game-over .btn--weapon,
+.mobile-ui.game-over .btn--pause {
+  display: none;
+}
+
 /* ─────────────────────────────────────────────────────────────
    12. RESPONSIVE BREAKPOINTS
    ───────────────────────────────────────────────────────────── */
@@ -824,6 +835,20 @@ button:active {
   z-index: 120;
   backdrop-filter: blur(8px);
   box-shadow: 0 0 28px rgba(0, 229, 255, 0.12);
+}
+
+/* FIX(ui2): on small/landscape viewports the fixed bottom-right shop could
+   cover the leaderboard, daily strip, or DEPLOY button. UIManager reparents
+   #coinShop into #startScreen's .screen__inner on those viewports and adds
+   this class, turning it into a normal, non-overlapping block in the menu's
+   own layout flow instead of an independently-floating panel. */
+.coin-shop--docked {
+  position: static;
+  width: 100%;
+  max-height: 38vh;
+  overflow-y: auto;
+  margin-top: var(--space-md);
+  box-shadow: none;
 }
 
 .shop-header {
