@@ -1,4 +1,3 @@
-
 "use strict";
 
 const DEBUG = false;
@@ -1083,14 +1082,30 @@ class Player {
       if (ax !== 0 || ay !== 0) return Math.atan2(ay, ax);
     }
 
-    const needsFallback = (input.isMobile || !input._mouseMoved) && this.game.enemies.length > 0;
-    if (needsFallback) {
-      let nearestDSq = Infinity, nearest = this.game.enemies[0];
+    // FIX(aim1): Manual aim — an active right-side touch-drag, or the mouse
+    // having actually moved — always wins over auto-aim, on ANY device.
+    // Auto-aim is a fallback for when the player isn't actively aiming, not
+    // something that should override live touch input just because the
+    // device happens to be classified as mobile.
+    const hasManualAim = input.aimTouchActive || input._mouseMoved;
+
+    // FIX(aim2): the boss was never a valid fallback target because it isn't
+    // stored in game.enemies. Folded into this computation only, without
+    // touching how the boss is stored/spawned elsewhere.
+    const boss = this.game.boss;
+    const hasFallbackTarget = this.game.enemies.length > 0 || (boss && boss.alive);
+
+    if (!hasManualAim && hasFallbackTarget) {
+      let nearestDSq = Infinity, nearest = null;
       for (const e of this.game.enemies) {
         const dSq = Utils.distSq(this.x, this.y, e.x, e.y);
         if (dSq < nearestDSq) { nearestDSq = dSq; nearest = e; }
       }
-      return Math.atan2(nearest.y - this.y, nearest.x - this.x);
+      if (boss && boss.alive) {
+        const dSq = Utils.distSq(this.x, this.y, boss.x, boss.y);
+        if (dSq < nearestDSq) { nearestDSq = dSq; nearest = boss; }
+      }
+      if (nearest) return Math.atan2(nearest.y - this.y, nearest.x - this.x);
     }
     return Math.atan2(input.mouseY - this.y, input.mouseX - this.x);
   }
@@ -1795,6 +1810,11 @@ class InputManager {
 
     this._mouseMoved = false;
 
+    // FIX(aim1): tracks whether a right-side touch-drag aim is currently
+    // held down, independent of firing state, so Player can tell "the player
+    // is manually aiming right now" apart from "the device supports touch".
+    this.aimTouchActive = false;
+
     this._bindListeners();
   }
 
@@ -1867,6 +1887,7 @@ class InputManager {
           _aimTouchId      = t.identifier;
           this.mouseX      = t.clientX - rect.left;
           this.mouseY      = t.clientY - rect.top;
+          this.aimTouchActive         = true;
           this._shootSources.aimTouch = true;
           this._updateShootState();
           this._shootBuffer = true;
@@ -1889,6 +1910,7 @@ class InputManager {
       for (const t of e.changedTouches) {
         if (t.identifier === _aimTouchId) {
           _aimTouchId = null;
+          this.aimTouchActive         = false;
           this._shootSources.aimTouch = false;
           this._updateShootState();
         }
@@ -2003,7 +2025,7 @@ class InputManager {
 
 
 // =============================================================================
-// SECTION 12 — UI MANAGER  (unchanged)
+// SECTION 12 — UI MANAGER
 // =============================================================================
 class UIManager {
   constructor(game) {
@@ -2025,7 +2047,14 @@ class UIManager {
       leaderboard:     document.getElementById("localLeaderboard"),
       coinShop:        document.getElementById("coinShop"),
       instructions:    document.getElementById("instructionsScreen"),
+      weaponBtnPC:     document.getElementById("weaponBtnPC"),
+      quitBtn:         document.getElementById("quitBtn"),
     };
+
+    // FIX(ui2): where #coinShop naturally lives depends on viewport size —
+    // see _layoutCoinShop(). Remember its original fixed-overlay parent so
+    // we can always move it back on larger viewports.
+    this._coinShopHomeParent = this._el.coinShop?.parentElement || null;
 
     this._pendingAscension = null;
 
@@ -2034,9 +2063,114 @@ class UIManager {
     this._renderCoinShop();
     this._renderDailyHistory();
     this._updateResumeButton();
+    this._layoutCoinShop();
+    window.addEventListener("resize", () => this._layoutCoinShop());
 
     const dailyDateLabel = document.getElementById("dailyDateLabel");
     if (dailyDateLabel) dailyDateLabel.textContent = `(${Utils.todayUTCString()})`;
+  }
+
+  // ── FIX(ui2): single owner of "what's visible in FSM state X" ─────────────
+  // This is the ONLY place screen/panel/floating-button visibility is
+  // decided. Every state transition routes through here instead of
+  // scattering classList.add/remove("hidden") calls across click handlers
+  // and FSM enter/exit hooks.
+  showScreen(state, opts = {}) {
+    const el     = this._el;
+    const mobile = this._shouldShowMobileUI();
+
+    const v = {
+      startScreen:     false,
+      coinShop:        false,
+      weaponBtnPCShown: false,
+      weaponBtnPCEnabled: true,
+      quitBtn:         false,
+      gameOverActions: false,
+      levelUp:         false,
+      ascension:       false,
+      mobileActive:    false,
+      mobileDimmed:    false, // PAUSED/LEVEL_UP: dim joystick/fire/weapon, keep them present
+      mobileGameOver:  false, // GAME_OVER: fully remove joystick/fire/weapon, not just dim
+    };
+
+    switch (state) {
+      case GameState.MENU:
+        v.startScreen = true;
+        v.coinShop    = true;
+        break;
+
+      case GameState.PLAYING:
+        v.mobileActive      = mobile;
+        v.weaponBtnPCShown  = true;
+        break;
+
+      case GameState.PAUSED:
+        v.mobileActive       = mobile;
+        v.mobileDimmed       = true;
+        v.weaponBtnPCShown   = true;
+        v.weaponBtnPCEnabled = false;
+        v.quitBtn            = true;
+        break;
+
+      case GameState.WAVE_TRANSITION:
+        v.mobileActive     = mobile;
+        v.weaponBtnPCShown = true;
+        break;
+
+      case GameState.LEVEL_UP:
+        v.mobileActive       = mobile;
+        v.mobileDimmed       = true;
+        v.weaponBtnPCShown   = true;
+        v.weaponBtnPCEnabled = false;
+        v.levelUp    = opts.panel !== "ascension";
+        v.ascension  = opts.panel === "ascension";
+        break;
+
+      case GameState.GAME_OVER:
+        v.gameOverActions = true;
+        v.mobileActive     = mobile;
+        v.mobileGameOver   = true;
+        break;
+    }
+
+    el.startScreen?.classList.toggle("hidden", !v.startScreen);
+    el.coinShop?.classList.toggle("hidden", !v.coinShop);
+    el.gameOverActions?.classList.toggle("hidden", !v.gameOverActions);
+    el.levelUp?.classList.toggle("hidden", !v.levelUp);
+    el.ascension?.classList.toggle("hidden", !v.ascension);
+    el.quitBtn?.classList.toggle("hidden", !v.quitBtn);
+
+    el.weaponBtnPC?.classList.toggle("hidden", !v.weaponBtnPCShown);
+    el.weaponBtnPC?.classList.toggle("is-disabled", v.weaponBtnPCShown && !v.weaponBtnPCEnabled);
+
+    el.mobileUI?.classList.toggle("mobile-ui--active", v.mobileActive);
+    el.mobileUI?.classList.toggle("paused", v.mobileDimmed);
+    el.mobileUI?.classList.toggle("game-over", v.mobileGameOver);
+
+    if (v.startScreen) this._layoutCoinShop();
+
+    this._currentScreenState = state;
+  }
+
+  // FIX(ui2): #coinShop is position:fixed/bottom-right and was laid out
+  // fully independently of #startScreen's centered .screen__inner, so on
+  // small/landscape viewports it could cover the leaderboard, daily strip,
+  // or DEPLOY button. On those viewports we dock it into the menu's actual
+  // layout flow (appended inside .screen__inner) instead of letting it
+  // float; on larger viewports it returns to its normal floating position.
+  _layoutCoinShop() {
+    const shop = this._el.coinShop;
+    if (!shop) return;
+    const inner = this._el.startScreen?.querySelector(".screen__inner");
+    const small = window.innerWidth < 640 || window.innerHeight < 560;
+
+    if (small && inner) {
+      if (shop.parentElement !== inner) inner.appendChild(shop);
+      shop.classList.add("coin-shop--docked");
+    } else if (this._coinShopHomeParent) {
+      if (shop.parentElement !== this._coinShopHomeParent) this._coinShopHomeParent.appendChild(shop);
+      shop.classList.remove("coin-shop--docked");
+    }
   }
 
   _bindUI() {
@@ -2142,12 +2276,7 @@ class UIManager {
         const raw  = nicknameInput ? nicknameInput.value.trim() : "";
         const name = raw.length > 0 ? raw : "Ghost";
         try { localStorage.setItem("ks_nickname", name); } catch {  }
-        this._el.startScreen.classList.add("hidden");
-        this._el.coinShop?.classList.add("hidden");
-        if (this._shouldShowMobileUI()) {
-          this._el.mobileUI.classList.add("mobile-ui--active");
-          attemptLandscapeLock();
-        }
+        if (this._shouldShowMobileUI()) attemptLandscapeLock();
         const dailyToggle = document.getElementById("dailyModeToggle");
         this.game.start({ daily: !!dailyToggle?.checked });
       });
@@ -2156,29 +2285,16 @@ class UIManager {
     const resumeBtn = document.getElementById("resumeBtn");
     if (resumeBtn) {
       resumeBtn.addEventListener("click", () => {
-        this._el.startScreen.classList.add("hidden");
-        this._el.coinShop?.classList.add("hidden");
-        if (this._shouldShowMobileUI()) {
-          this._el.mobileUI.classList.add("mobile-ui--active");
-          attemptLandscapeLock();
-        }
-        if (!this.game.resumeRun()) {
-          this._el.startScreen.classList.remove("hidden");
-          this._updateResumeButton();
-        }
+        if (this._shouldShowMobileUI()) attemptLandscapeLock();
+        if (!this.game.resumeRun()) this._updateResumeButton();
       });
     }
 
     const restartBtn = document.getElementById("restartBtn");
     if (restartBtn) {
       restartBtn.addEventListener("click", () => {
-        this._el.gameOverActions.classList.add("hidden");
         document.getElementById("gameOverCoins")?.classList.add("hidden");
-        this._el.coinShop?.classList.add("hidden");
-        if (this._shouldShowMobileUI()) {
-          this._el.mobileUI.classList.add("mobile-ui--active");
-          attemptLandscapeLock();
-        }
+        if (this._shouldShowMobileUI()) attemptLandscapeLock();
         this.game.start();
       });
     }
@@ -2186,12 +2302,9 @@ class UIManager {
     const menuBtn = document.getElementById("menuBtn");
     if (menuBtn) {
       menuBtn.addEventListener("click", () => {
-        this._el.gameOverActions.classList.add("hidden");
         document.getElementById("gameOverCoins")?.classList.add("hidden");
-        this._el.mobileUI.classList.remove("mobile-ui--active");
         this._renderLeaderboard();
         this._renderCoinShop();
-        this._el.startScreen.classList.remove("hidden");
         cancelAnimationFrame(this.game._rafId);
         this.game.fsm.transition(GameState.MENU);
       });
@@ -2220,7 +2333,6 @@ class UIManager {
         if (!type || !(type in this.game.player.upgrades)) return;
         this.game.player.upgrades[type]++;
         if (type === "health") this.game.player.health = this.game.player.maxHealth;
-        this._el.levelUp.classList.add("hidden");
         this.game.fsm.transition(GameState.PLAYING);
         this.game.lastTime = performance.now();
       });
@@ -2244,7 +2356,7 @@ class UIManager {
 
   showLevelUp() {
     this.game.fsm.transition(GameState.LEVEL_UP);
-    this._el.levelUp.classList.remove("hidden");
+    this.showScreen(GameState.LEVEL_UP, { panel: "levelup" });
   }
 
   showAscensionChoice() {
@@ -2269,7 +2381,6 @@ class UIManager {
         btn.addEventListener("click", () => {
           this.game.player.mods[mod.id] = true;
           this._pendingAscension = null;
-          this._el.ascension.classList.add("hidden");
           this.game.fsm.transition(GameState.PLAYING);
           this.game.lastTime = performance.now();
         });
@@ -2278,7 +2389,7 @@ class UIManager {
     }
 
     this.game.fsm.transition(GameState.LEVEL_UP);
-    this._el.ascension?.classList.remove("hidden");
+    this.showScreen(GameState.LEVEL_UP, { panel: "ascension" });
   }
 
   _pickAscensionPair() {
@@ -2313,17 +2424,9 @@ class UIManager {
     this._pendingAscension = null;
 
     this.game.fsm.transition(GameState.MENU);
-    this._el.gameOverActions.classList.add("hidden");
-    this._el.levelUp.classList.add("hidden");
-    this._el.ascension?.classList.add("hidden");
-    this._el.mobileUI.classList.remove("mobile-ui--active");
-    this._el.mobileUI.classList.remove("paused");
-    const qb = document.getElementById("quitBtn");
-    if (qb) qb.classList.add("hidden");
     this._renderLeaderboard();
     this._renderCoinShop();
     this._updateResumeButton();
-    this._el.startScreen.classList.remove("hidden");
 
     if (coinsEarned > 0) this._showQuitToast(`+${coinsEarned} coins earned — returning to menu`);
   }
@@ -2371,8 +2474,6 @@ class UIManager {
     const existingSummary = this._el.gameOverActions.querySelector(".run-summary");
     if (existingSummary) existingSummary.remove();
     this._el.gameOverActions.prepend(summaryEl);
-
-    this._el.gameOverActions.classList.remove("hidden");
 
     const coinsEl = document.getElementById("gameOverCoins");
     if (coinsEl) {
@@ -2494,7 +2595,6 @@ class UIManager {
     const el = this._el.coinShop;
     if (!el) return;
 
-    el.classList.remove("hidden");
     const coins = this.game.meta.getCoins();
     const data  = this.game.meta.load();
 
@@ -3132,43 +3232,38 @@ class Game {
 
   _wireFSM() {
     this.fsm
+      .register(GameState.MENU, {
+        enter: () => { this.ui.showScreen(GameState.MENU); },
+      })
       .register(GameState.PLAYING, {
-        exit: () => { this.lastTime = performance.now(); },
+        enter: () => { this.ui.showScreen(GameState.PLAYING); },
+        exit:  () => { this.lastTime = performance.now(); },
       })
       .register(GameState.PAUSED, {
-        enter: () => {
-          const btn = document.getElementById("quitBtn");
-          if (btn) btn.classList.remove("hidden");
-          this.ui._el.mobileUI.classList.add("paused");
-          document.getElementById("weaponBtnPC")?.classList.add("is-disabled");
-        },
-        exit: () => {
-          const btn = document.getElementById("quitBtn");
-          if (btn) btn.classList.add("hidden");
-          this.ui._el.mobileUI.classList.remove("paused");
-          document.getElementById("weaponBtnPC")?.classList.remove("is-disabled");
-          this.lastTime = performance.now();
-        },
+        enter: () => { this.ui.showScreen(GameState.PAUSED); },
+        exit:  () => { this.lastTime = performance.now(); },
       })
       .register(GameState.GAME_OVER, {
         enter: () => {
           this.clearSavedRun();
+          this.ui.showScreen(GameState.GAME_OVER);
           this.ui.showGameOver();
           this.audio.stopAmbient();
-          this.ui._el.mobileUI.classList.add("paused");
-          document.getElementById("weaponBtnPC")?.classList.add("is-disabled");
-        },
-        exit: () => {
-          this.ui._el.mobileUI.classList.remove("paused");
-          document.getElementById("weaponBtnPC")?.classList.remove("is-disabled");
         },
       })
       .register(GameState.WAVE_TRANSITION, {
+        enter: () => { this.ui.showScreen(GameState.WAVE_TRANSITION); },
       })
       .register(GameState.LEVEL_UP, {
-        enter: () => {},
-        exit:  () => {},
+        // Entered via UIManager.showLevelUp() / showAscensionChoice(), which
+        // call showScreen(LEVEL_UP, {panel}) directly since they're the only
+        // ones who know which of the two panels to show.
       });
+
+    // Establish correct initial DOM visibility for the FSM's starting state
+    // (MENU) without a no-op transition — GameFSM.transition() only fires
+    // hooks on an actual state change.
+    this.ui.showScreen(GameState.MENU);
   }
 
   _resize() {
