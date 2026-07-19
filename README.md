@@ -14,7 +14,7 @@
 
 ## 🌌 Overview
 
-**KritikShoot** is a high-octane survival game featuring a sleek "Neon-Noir / Cyberpunk" aesthetic. You pilot a sharp, swept-back delta-wing fighter, battling relentless swarms of neon geometric enemies. Built purely on vanilla web technologies, it features dynamic wave generation, deep in-run powerups, a persistent meta-progression economy, and intense boss encounters.
+**KritikShoot** is a high-octane survival game featuring a sleek "Neon-Noir / Cyberpunk" aesthetic. You pilot a sharp, swept-back delta-wing fighter, battling relentless swarms of neon geometric enemies. Built purely on vanilla web technologies, it features dynamic wave generation, deep in-run powerups, a persistent meta-progression economy, daily challenges, and intense boss encounters.<!--[cite: 1, 2] -->
 
 ---
 
@@ -22,135 +22,106 @@
 
 The engine is engineered for flawless high-Hz performance, implementing advanced game development patterns natively in JavaScript:
 
-* **Fixed-Step Physics with Temporal Interpolation:** The game loop uses an accumulator to decouple physics logic (fixed at 60Hz) from the render loop. Entities cache their previous positions, and rendering uses linear interpolation (`lerp`), eliminating micro-stutters and ensuring smooth movement on 120Hz/144Hz displays.
-* **Dead-Flag Object Pooling & Compaction:** Bullets, particles, and floating damage numbers are managed via custom object pools to prevent garbage collection pauses. Instead of using expensive `Array.splice()`, dead entities are flagged and skipped during rendering. When dead slots exceed a 35% threshold, the array undergoes a lightning-fast bulk compaction.
-* **O(1) Swap-and-Pop with Dynamic Indexing:** Enemy arrays are managed with lightning-fast swap-and-pop operations. The engine dynamically patches entity index maps in lockstep during concurrent collision loops to prevent state corruption and wave-clear softlocks.
-* **Spatial Hash Grid Collisions:** Swept-circle continuous collision detection (CCD) is optimized through a custom Spatial Hash Grid. This includes a dedicated broad-phase `wallHash` for environment boundaries, allowing for massive enemy swarms and bullet counts without tanking frame rates.
-* **O(1) Circular Buffer Trails:** Entity neon trails are managed using a pre-allocated ring buffer with modulo indexing, replacing costly `Array.shift()` array copy operations with `O(1)` pointer advancements.
-* **LRU Glow Sprite Cache:** Canvas-drawn radial gradients (neon glows) are expensive. The `GlowCache` dynamically renders and caches sprites based on color and size, utilizing an auto-evicting 128-entry LRU (Least Recently Used) cache to prevent unbound memory growth.
-* **Finite State Machine (FSM):** Clean architectural transitions between `MENU`, `PLAYING`, `PAUSED`, `LEVEL_UP`, `WAVE_TRANSITION`, and `GAME_OVER` states.
-* **Strict Memory Management:** Frame-perfect clearing of deduplication sets (like collision tracking) ensures zero memory leaks or unbounded growth during extended runs.
-* **State & Concurrency Safety:** Entities like Enemies and Bosses utilize strict `alive` boolean flags to prevent simultaneous double-death triggers during concurrent collision and update loops.
-* **Fault-Tolerant Storage:** All `localStorage` interactions are guarded by `try/catch` blocks, strict schema type-checking, and `NaN` validation. This ensures the persistent coin economy and leaderboards remain uncorrupted even if browser storage quotas are exceeded or manually tampered with.
+* **Fixed-Step Physics with Temporal Interpolation:** The game loop uses an accumulator to decouple physics logic (fixed at 60Hz) from the render loop.<!--[cite: 1] --> Entities cache their previous positions, and rendering uses linear interpolation (`lerp`), eliminating micro-stutters and ensuring smooth movement on 120Hz/144Hz displays.<!--[cite: 1] -->
+* **Decoupled System Architecture:** Uses a lightweight `EventBus` to prevent tight coupling between the UI manager and the core game loop, and extracts spawning/combat logic into standalone `WaveSystem` and `CombatSystem` classes.<!--[cite: 1] -->
+* **Adaptive Performance Budgeting:** Actively monitors frame-times via a rolling watchdog and detects hardware concurrency.<!--[cite: 1] --> If the device struggles, a one-way `lowPowerMode` seamlessly halves particle emissions and downscales glow resolution without interrupting gameplay.<!--[cite: 1] -->
+* **Advanced Memory Pooling & Compaction:** Bullets, particles, and floating damage numbers are managed via custom object pools.<!--[cite: 1] --> The SpatialHash grid now pools its bucket arrays to eliminate per-tick GC allocation overhead.<!--[cite: 1] --> When dead slots in entity arrays exceed 35%, a lightning-fast bulk compaction replaces expensive `Array.splice()` operations.<!--[cite: 1] -->
+* **O(1) Circular Buffer Trails:** Entity neon trails are managed using a pre-allocated ring buffer with modulo indexing, replacing costly `Array.shift()` array copy operations with `O(1)` pointer advancements.<!--[cite: 1] -->
+* **Batched Rendering Passes:** Canvas state changes (`ctx.save()` / `restore()`) are batched by category (e.g., grouping all critical hit numbers together) to drastically reduce draw call overhead.<!--[cite: 1] -->
+* **Fault-Tolerant Storage & Save States:** Features a robust mid-run save/resume system hooked to tab visibility, capable of safely restoring precise finite state machine phases (including mid-level-up screens).<!--[cite: 1] -->
 
 ---
 
 ## 🎮 Gameplay Systems
 
-### Dynamic Wave Budgeting
-Instead of random spawning, the game uses a **Threat Budget System**. 
-* The budget increases dynamically: `Math.min(60, 8 + wave * 3)`.
-* Enemies have designated "costs" and "unlock waves".
-* The engine dynamically purchases enemies from the unlocked bestiary until the wave budget is exhausted, ensuring a balanced, escalating difficulty curve.
-* A dedicated Boss pre-warning indicator ("⚠ BOSS INCOMING") alerts players during the inter-wave countdown immediately preceding a boss wave.
+### Dynamic Wave Budgeting & Daily Challenges
+Instead of random spawning, the game uses a **Threat Budget System** that increases dynamically: `Math.min(60, 8 + wave * 3)`.<!--[cite: 1] -->
+* The engine purchases enemies from an unlocked bestiary until the budget is exhausted, ensuring a balanced, escalating difficulty curve.<!--[cite: 1] -->
+* **Daily Challenge Mode:** Players can toggle a daily seeded run driven by a `Mulberry32` PRNG.<!--[cite: 1, 2] --> Includes a rolling 30-day streak tracker and a Wordle-style "Copy Result" clipboard feature.<!--[cite: 1, 2] -->
 
-### Line-of-Sight (LoS) AI & Flocking
-* Ranged enemies and Bosses utilize Liang–Barsky parametric clipping raycasts to check Line-of-Sight against the environment. They will hold their fire if a wall or crate is blocking the player.
-* Enemies utilize Boids-style separation forces to naturally swarm without overlapping into a single point.
-
-### Environment & Destructibility
-* **Destructible Walls:** Procedurally generated rectangular blocks with integrated HP bars that can be destroyed to open up the arena.
-* **Indestructible Crates & Pillars:** Solid metallic crates and glowing neon pillars provide permanent cover for LoS breaking.
-* **Combat Feedback:** Enemies dynamically display floating 4px inline health bars when damaged, providing clear combat feedback without cluttering the UI.
+### Environment, Cover & Hazards
+* **Line-of-Sight (LoS) AI:** Ranged enemies and Bosses utilize Liang–Barsky parametric clipping raycasts to check LoS against cover.<!--[cite: 1] -->
+* **Environmental Destruction:** Starting at wave 13, the arena dynamically targets central cover blocks for destruction on a 3-wave cadence, forcing players to adapt as cover degrades.<!--[cite: 1] --> A pulsing HUD warning alerts players when arena cover drops below 30%.<!--[cite: 1] -->
+* **Corruption Zones:** From wave 10 onward, defeated bosses leave behind a spreading, persistent Damage-over-Time (DoT) zone of dark purple corruption that damages both players and enemies.<!--[cite: 1] -->
 
 ---
 
 ## ⚔️ Arsenal & Progression
 
 ### Weapons (Cycle with `E` / `Shift`)
-1. **Default Gun:** High fire-rate, reliable single-target damage.
-2. **Shotgun (Spread):** Fires a dense 6-pellet burst in a 40° cone. Perfect for close-quarters crowd control. Total DPS output is mathematically balanced to match laser efficiency at mid-range (~1.9x base damage).
-3. **Piercing Laser:** Fires a high-velocity, high-damage cyan bolt that penetrates up to 4 enemies before dissipating.
+1. **Default Gun:** High fire-rate, reliable single-target damage.<!--[cite: 1] -->
+2. **Shotgun (Spread):** Fires a dense 6-pellet burst in a 40° cone. Total DPS output is mathematically balanced to match laser efficiency at mid-range.<!--[cite: 1] -->
+3. **Piercing Laser:** Fires a high-velocity cyan bolt that penetrates up to 4 enemies before dissipating.<!--[cite: 1] -->
 
-### In-Run Leveling & Powerups
-Defeating enemies grants XP. Leveling up pauses the game and allows you to choose one of the following stackable session upgrades:
-* ⚡ Move Speed | ❤ Max Health | 💥 Damage | 🔥 Fire Rate | 🚀 Bullet Speed | 🎯 Crit Chance | 🩸 Lifesteal
-
-Enemies have a 20% chance to drop temporary timed buffs:
-* **Health (Pink):** Instant +35 HP heal.
-* **XP (Yellow):** Instant +30 XP boost.
-* **Shield (Cyan):** 10-second invulnerability aura.
-* **Triple Shot (Orange):** 8-second 3-way spread for the default gun.
-* **Speed Boost (Green):** 7-second massive speed overdrive.
-* **Rage (Red):** 5-second double-damage multiplier.
+### In-Run Leveling & Build-Defining Mods
+Defeating enemies grants XP.<!--[cite: 1] --> Leveling up pauses the game and offers stackable session upgrades:
+* **Standard Upgrades:** ⚡ Move Speed | ❤ Max Health | 💥 Damage | 🔥 Fire Rate | 🚀 Bullet Speed | 🎯 Crit Chance | 🩸 Lifesteal<!--[cite: 2] -->
+* **Build Mods (Level 3+):** Run-altering tradeoffs, such as *Glass Cannon Core* (+40% damage, -25% max HP), *Kinetic Overload* (non-crits ricochet into nearby enemies, -5% crit chance), or *Corrosive Rounds* (kills trigger corruption pulses, -10% damage).<!--[cite: 1] -->
+* **Ascension Mods (Levels 10/20/30):** Weapon-specific augments like *Ricochet Rounds*, *Detonator Pellets*, or *Beam Split*.<!--[cite: 1, 2] -->
 
 ### 🪙 Persistent Meta-Progression (Local Storage)
-Coins are earned based on wave completion and survival time (`wave * 10 + floor(gameTime / 5)`). Visit the **Upgrade Depot** in the main menu to purchase permanent, multi-tiered upgrades that persist between sessions:
-* ⚡ Fire Rate (+5% per tier)
-* ❤ Max HP (+25 per tier)
-* 💥 Damage (+5 per tier)
-* 🏃 Move Speed (+15 per tier)
-* 🚀 Bullet Speed (+40 per tier)
+Coins are earned based on wave completion and survival time.<!--[cite: 1] --> Visit the **Upgrade Depot** to purchase multi-tiered, permanent upgrades:<!--[cite: 1] -->
+* ⚡ Fire Rate | ❤ Max HP | 💥 Damage | 🏃 Move Speed | 🚀 Bullet Speed<!--[cite: 1] -->
+* 🛡 **Starting Ward** (Spawn with a temporary shield)<!--[cite: 1] -->
+* 🧲 **Magnetism** (Increased powerup pull radius)<!--[cite: 1] -->
+* 🔫 **Loadout Swap** (Permanently spawn with the Shotgun equipped)<!--[cite: 1] -->
 
 ---
 
 ## 👾 Enemy Bestiary
 
-Prepare to face a diverse swarm of glowing geometric threats:
-
 | Type | Aesthetic | Behavior |
 | :--- | :--- | :--- |
-| **Normal** | 🟢 Green Square | Standard rusher, balanced HP and speed. |
-| **Rusher** | 🔴 Red Triangle | Fragile but incredibly fast. Melee damage only. |
-| **Fast** | 🟡 Yellow Triangle | Agile hit-and-run flanker. |
-| **Ranged** | 🌐 Cyan Octagon | Technological sniper. Maintains a 260px distance, uses LoS raycasting, and randomly assigns CW/CCW orbital strafing directions upon spawning. |
-| **Spread** | 🟣 Purple Pentagon | Fires a deadly 3-way bullet spread. |
-| **Exploder**| 🟠 Orange Square | Detonates on proximity, causing massive AoE damage and intense screen shake. |
-| **Tank** | 🔵 Blue Hexagon | Massive, slow-moving behemoth with 250% base HP. |
+| **Normal** | 🟢 Green Square | Standard rusher, balanced HP and speed.<!--[cite: 1] --> |
+| **Rusher** | 🔴 Red Triangle | Fragile but incredibly fast. Uses primitive proximity checks for direct melee damage.<!--[cite: 1] --> |
+| **Fast** | 🟡 Yellow Triangle | Agile hit-and-run flanker.<!--[cite: 1] --> |
+| **Ranged** | 🌐 Cyan Octagon | Technological sniper. Maintains a 260px distance, uses LoS raycasting, and randomly assigns CW/CCW orbital strafing directions.<!--[cite: 1] --> |
+| **Spread** | 🟣 Purple Pentagon | Fires a deadly 3-way bullet spread.<!--[cite: 1] --> |
+| **Exploder**| 🟠 Orange Square | Detonates on proximity, causing massive AoE damage and intense screen shake.<!--[cite: 1] --> |
+| **Tank** | 🔵 Blue Hexagon | Massive, slow-moving behemoth with 250% base HP and a heavy melee attack.<!--[cite: 1] --> |
 
 ### ☠️ Boss Encounters
-Every 5th wave halts standard spawning and summons a **Boss**.
-* Takes 50% reduced damage from all player attacks.
-* **Phase 1: Radial Hell:** Fires expanding, interleaved rings of bullets (bullet-hell style).
-* **Phase 2: Rest & Volley:** Pauses, tracking the player with a targeted 3-round burst if LoS is clear.
-* **Phase 3: Charge Dash:** Telegraphs by flashing gold for 1.2s, then executes a hyper-speed, high-damage dash at the player's last known location.
+Every 5th wave halts standard spawning and summons a **Boss**.<!--[cite: 1] -->
+* **Phase 1: Radial Hell:** Fires expanding, interleaved rings of bullets.<!--[cite: 1] -->
+* **Phase 2: Rest & Volley:** Pauses, tracking the player with a targeted 3-round burst.<!--[cite: 1] -->
+* **Phase 3: Charge Dash:** Telegraphs by flashing, then executes a hyper-speed dash at the player's last known location.<!--[cite: 1] -->
 
 ---
 
-## 🎵 Procedural Audio Engine
+## 🎵 Procedural Audio & Haptics Engine
 
-**Zero audio files are loaded.** 100% of the game's sound is synthesized in real-time using the Web Audio API (`OscillatorNode`, `BiquadFilterNode`, `GainNode`):
-* **Pew:** Rapid descending square wave chirp.
-* **Boom (Hit):** Deep sine sub-bass thud layered with a white noise crackle.
-* **Crunch (Death):** Band-pass filtered noise burst.
-* **Laser:** Sawtooth wave with rapid frequency modulation.
-* **Thwump (Spread):** Two slightly detuned triangle/sine oscillators creating a chunky shotgun feel.
-* **Audio Engine Polish:** The engine utilizes `linearRampToValueAtTime` for volume decay, effectively eliminating harsh audio clicking or popping artifacts. The audio system also features a fully functional mute toggle that safely bypasses oscillator generation.
-* *Note: The engine includes automated `GainNode` garbage collection via `onended` hooks to prevent memory leaks.*
+**Zero audio files are loaded.** 100% of the game's sound is synthesized in real-time using the Web Audio API (`OscillatorNode`, `BiquadFilterNode`, `GainNode`):<!--[cite: 1] -->
+* **Dynamic Ambient Bed:** A procedural background track featuring detuned sine/triangle drones and a slow breathing LFO that dynamically scales intensity based on wave progress and enemy density.<!--[cite: 1] -->
+* **SFX Jitter:** Hit and shooting SFX employ randomized frequency sweeps to ensure every impact feels distinct and avoids auditory fatigue.<!--[cite: 1] -->
+* **Hit-Stop & Haptics:** Boss deaths and heavy explosions freeze the physics accumulator for a few frames (Hit-stop), add low-frequency camera thuds, and trigger mobile device vibrations (`navigator.vibrate`) for intense tactile feedback.<!--[cite: 1] -->
 
 ---
 
 ## ⌨️ Controls & Input Management
 
-The `InputManager` supports simultaneous, sub-tick buffered inputs across all device types. State-safe input flags are unconditionally read and cleared every frame. This logic prevents stale inputs (like weapon cycling) from silently triggering when returning from paused or leveling states.
+The `InputManager` supports simultaneous, sub-tick buffered inputs. State-safe input flags are unconditionally read and cleared every frame, ensuring seamless FSM transitions.<!--[cite: 1] -->
 
-### Desktop
-* **Move:** `W`, `A`, `S`, `D` or `Arrow Keys`
-* **Aim & Fire:** `Mouse Cursor` & `Left Click`
-* **Cycle Weapon:** `E` or `Shift`
-* **Pause:** `ESC`
-* **Quit (While Paused):** `Q`
+### Desktop (Dual-Stick Parity)
+* **Move:** `W`, `A`, `S`, `D`<!--[cite: 2] -->
+* **Aim:** `Mouse Cursor` OR `Arrow Keys` (Arrow keys automatically override the mouse for true dual-stick keyboard play).<!--[cite: 1, 2] -->
+* **Fire:** `Left Click` or `Spacebar`<!--[cite: 1, 2] -->
+* **Cycle Weapon:** `E` or `Shift`<!--[cite: 2] -->
+* **Pause / Quit:** `ESC` to pause, `Q` to quit to menu.<!--[cite: 2] -->
 
 ### Mobile (Touch)
-* **Move:** Left-side Dynamic Virtual Joystick (Normalized [-1,1] vectoring).
-* **Aim:** Right-side Touch & Drag (Dual-Touch support).
-* **Fire (Multi-Source Merging):** Auto-fires while joystick is active, or use the on-screen `FIRE` button. Independent input sources track individual state flags that are logically merged every frame, ensuring touch and UI button inputs never cancel each other out.
+* **Move:** Left-side Dynamic Virtual Joystick (ignores inner dead-zone micro-jitters).<!--[cite: 1, 2] -->
+* **Aim & Fire:** Right-side Touch & Drag (prioritizes manual touch inputs over auto-aim fallbacks).<!--[cite: 1, 2] --> Auto-fires while the joystick is active, or via the on-screen `FIRE` button.<!--[cite: 1, 2] -->
 
 ---
 
-## 🎨 UI/UX & Design System
+## 🎨 UI/UX, Design System, & Accessibility
 
-* **Glassmorphism:** Overlays, menus, and the Shop utilize deep blur backdrops (`backdrop-filter: blur`) with glowing neon borders.
-* **Typography:** `Orbitron` is used for sharp, futuristic display headers, while `Rajdhani` provides highly legible HUD metrics.
-* **Dynamic HUD:** Real-time interpolated HP/XP bars, active buff timers, and wave counters are featured on the canvas. The DOM button acts as the single source of truth for the current weapon to keep the UI clean.
-* **PWA Ready:** Implements `mobile-web-app-capable` and `apple-mobile-web-app-capable` meta tags. To improve accessibility, the viewport permits pinch-zooming up to a 3.0 scale (`maximum-scale=3.0`) without breaking the core fixed-canvas layout.
-* **Landscape Optimization:** Features a dedicated media query for landscape mobile devices, dynamically scaling the UI, repositioning virtual joysticks, and ensuring menus remain fully scrollable. 
-* **Ergonomic Positioning:** The mobile weapon switch button is situated in the top-right cluster to eliminate visual overlap with the canvas-drawn HUD statistics.
-* **Smart Overlay States:** Non-interactive mobile controls gracefully fade out and disable their hitboxes when the game is paused or transitioning to the Game Over screen, keeping the focus entirely on the active menu UI.
-* **Run Summary Stats:** The pause menu features a real-time statistical breakdown of the current run, tracking wave count, total kills, time elapsed, and weapon usage metrics.
-* **Quit-With-Progress:** Quitting a session mid-run securely banks earned coins and preserves leaderboard data. This action triggers a lightweight, self-dismissing CSS-animated toast notification to confirm the save without requiring an intrusive modal.
-* **Strict CSS Tokenization:** Replaces hardcoded hex values with a unified set of custom properties (`var(--col-*)`) for seamless theming and rendering consistency.
-* **Local Leaderboard:** Saves top 10 unique scores securely to `localStorage`, entirely decoupled from remote backends for absolute privacy and offline play.
+* **Robust Accessibility Options:** Players can toggle high-contrast "Shape-Only ID" outlines for enemies, manually scale all HUD/DOM text in three steps, and adjust screen shake intensity via a dedicated settings modal.<!--[cite: 1, 2, 3] -->
+* **Reduced Motion Compliance:** Seamlessly hooks into OS-level `@media (prefers-reduced-motion)` preferences to automatically dampen screen shake, reduce particle emissions, and scale down hit-stop flashes.<!--[cite: 1, 3] -->
+* **Colorblind-Friendly Powerups:** All drops feature distinct Unicode glyphs (e.g., ✚ for Health, ✦ for XP, ◈ for Shield) layered over their neon glows.<!--[cite: 1] -->
+* **Responsive Docking:** On small or landscape viewports, floating UI elements like the Coin Shop intelligently reparent into the main DOM flow to prevent layout overlapping.<!--[cite: 1, 3] -->
+* **Glassmorphism:** Overlays, menus, and the Shop utilize deep blur backdrops (`backdrop-filter: blur`) with glowing neon borders.<!--[cite: 3] -->
+* **Zero-Cost Dev HUD:** Pressing the backtick (``` ` ```) key toggles an on-screen performance monitor tracking frametimes and entity counts (fully stripped from the runtime loop when disabled via a boolean debug flag).<!--[cite: 1] -->
 
 ---
 
