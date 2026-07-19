@@ -1335,6 +1335,29 @@ button:active {
   color: rgba(10, 14, 22, 0.7);   
 }
 
+/* FIX(levelup2b): build-defining level-up choice — reuses the ascension
+   button's title/desc layout, spans the full grid width, and gets a
+   distinct accent so it reads as a different kind of choice from the
+   plain numeric upgrades around it. */
+.btn--buildmod {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(4px * var(--ui-scale));
+  text-align: left;
+  border-color: rgba(189, 0, 255, 0.45);
+  box-shadow: 0 0 16px rgba(189, 0, 255, 0.12);
+}
+
+.btn--buildmod .upgrade-title {
+  color: #e0b3ff;
+}
+
+.btn--buildmod:hover .upgrade-desc {
+  color: rgba(10, 14, 22, 0.7);
+}
+
 /* ─────────────────────────────────────────────────────────────
    DAILY CHALLENGE HISTORY STRIP
    ───────────────────────────────────────────────────────────── */
