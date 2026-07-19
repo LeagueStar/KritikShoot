@@ -175,6 +175,28 @@ const ASCENSION_MODS = Object.freeze([
   },
 ]);
 
+// FIX(levelup2b): build-defining level-up choices. Unlike the 7 numeric
+// upgrades, each of these changes bullet behavior or creates a real
+// stat tradeoff, and can only be picked once per run. minLevel keeps them
+// from crowding out the numeric options too early in a run.
+const BUILD_MODS = Object.freeze([
+  {
+    id: "corrosiveRounds", minLevel: 3,
+    label: "\u{2623}\u{FE0F} Corrosive Rounds",
+    desc: "Kills leave a small corruption pulse that burns nearby enemies. -10% damage.",
+  },
+  {
+    id: "kineticOverload", minLevel: 3,
+    label: "\u{1F3B1} Kinetic Overload",
+    desc: "25% chance for a non-crit hit to ricochet into the next enemy. -5% crit chance.",
+  },
+  {
+    id: "glassCannonCore", minLevel: 3,
+    label: "\u{1F480} Glass Cannon Core",
+    desc: "+40% damage. -25% max health.",
+  },
+]);
+
 const Utils = {
 
   distSq(x1, y1, x2, y2) {
@@ -386,6 +408,34 @@ class GameFSM {
 
   is(state)    { return this._state === state; }
   isNot(state) { return this._state !== state; }
+}
+
+
+// =============================================================================
+// SECTION 4B — EVENT BUS
+// =============================================================================
+// FIX(decouple2a): a minimal pub/sub so the game loop and the UI layer can
+// talk to each other without reaching directly into one another's internals.
+// Deliberately tiny — this is not a framework-style rewrite, just enough to
+// remove the direct cross-cutting calls (Player -> UIManager.showX(),
+// UIManager -> Player.upgrades/mods/health) that made the Part 1 bug class
+// easy to reintroduce.
+class EventBus {
+  constructor() { this._listeners = new Map(); }
+
+  on(evt, fn) {
+    if (!this._listeners.has(evt)) this._listeners.set(evt, new Set());
+    this._listeners.get(evt).add(fn);
+    return () => this.off(evt, fn);
+  }
+
+  off(evt, fn) { this._listeners.get(evt)?.delete(fn); }
+
+  emit(evt, payload) {
+    const set = this._listeners.get(evt);
+    if (!set) return;
+    for (const fn of [...set]) fn(payload);
+  }
 }
 
 
@@ -1053,12 +1103,27 @@ class Player {
     this._cachedAimAngle = 0;
   }
 
-  get maxHealth()  { return CONFIG.PLAYER_BASE_HEALTH + this.upgrades.health * 20    + this.game.meta.getBonus("health"); }
+  // FIX(levelup2b): Glass Cannon Core trades max health for damage — both
+  // sides live here so the tradeoff can never drift out of sync.
+  get maxHealth()  {
+    let h = CONFIG.PLAYER_BASE_HEALTH + this.upgrades.health * 20 + this.game.meta.getBonus("health");
+    if (this.mods.glassCannonCore) h *= 0.75;
+    return h;
+  }
   get speed()      { return Math.min(800, CONFIG.PLAYER_BASE_SPEED + (this.upgrades.speed * 30) + (this.buffs.speedBoost > 0 ? 150 : 0) + this.game.meta.getBonus("speed")); }
-  get damage()     { return CONFIG.PLAYER_BASE_DAMAGE + (this.upgrades.damage * 2)   + this.game.meta.getBonus("damage"); }
+  get damage()     {
+    let d = CONFIG.PLAYER_BASE_DAMAGE + (this.upgrades.damage * 2) + this.game.meta.getBonus("damage");
+    if (this.mods.glassCannonCore)  d *= 1.4;
+    if (this.mods.corrosiveRounds)  d *= 0.9;
+    return d;
+  }
   get shootDelay() { return Math.max(0.05, CONFIG.PLAYER_SHOOT_DELAY - (this.upgrades.fireRate * 0.02) - this.game.meta.getBonus("fireRate")); }
   get bulletSpd()  { return CONFIG.PLAYER_BULLET_SPEED + (this.upgrades.bulletSpeed * 30) + this.game.meta.getBonus("bulletSpeed"); }
-  get critChance() { return this.upgrades.critChance * 0.05; }
+  get critChance() {
+    let c = this.upgrades.critChance * 0.05;
+    if (this.mods.kineticOverload) c = Math.max(0, c - 0.05);
+    return c;
+  }
   get lifesteal()  { return this.upgrades.lifesteal  * 0.05; }
 
   static SYNERGY_TIER = 3;
@@ -1225,6 +1290,34 @@ class Player {
     }
   }
 
+  // FIX(decouple2a): UIManager previously wrote directly into
+  // this.upgrades[type]/this.mods[id] and this.health. Owning these as
+  // methods means Player controls its own invariants (e.g. full-heal on a
+  // health pick) instead of the UI layer reaching into internals it doesn't
+  // own.
+  applyUpgrade(type) {
+    if (!type || !(type in this.upgrades)) return false;
+    this.upgrades[type]++;
+    if (type === "health") this.health = this.maxHealth;
+    return true;
+  }
+
+  applyAscensionMod(id) {
+    if (!id || !ASCENSION_MODS.some(m => m.id === id)) return false;
+    this.mods[id] = true;
+    return true;
+  }
+
+  // FIX(levelup2b): one-time build-defining picks. Glass Cannon Core lowers
+  // maxHealth immediately, so current health is clamped down with it rather
+  // than leaving the player visually "overhealed" above their new cap.
+  applyBuildMod(id) {
+    if (!id || !BUILD_MODS.some(m => m.id === id) || this.mods[id]) return false;
+    this.mods[id] = true;
+    if (id === "glassCannonCore") this.health = Math.min(this.health, this.maxHealth);
+    return true;
+  }
+
   addXP(amount) {
     this.stats.xp += amount;
     if (this.stats.xp >= this.stats.xpToNext) {
@@ -1232,12 +1325,12 @@ class Player {
       this.stats.xp      -= this.stats.xpToNext;
       this.stats.xpToNext = Math.floor(this.stats.xpToNext * 1.2);
       this.game._vibrate(25);
-      if (ASCENSION_LEVELS.includes(this.stats.level) && !this._ascensionLevelsSeen.has(this.stats.level)) {
-        this._ascensionLevelsSeen.add(this.stats.level);
-        this.game.ui.showAscensionChoice();
-      } else {
-        this.game.ui.showLevelUp();
-      }
+      // FIX(decouple2a): emit rather than reach into this.game.ui directly —
+      // UIManager decides what "level up" looks like on screen; Player only
+      // reports that it happened.
+      const ascension = ASCENSION_LEVELS.includes(this.stats.level) && !this._ascensionLevelsSeen.has(this.stats.level);
+      if (ascension) this._ascensionLevelsSeen.add(this.stats.level);
+      this.game.events.emit("player:levelup", { level: this.stats.level, ascension });
     }
   }
 
@@ -2058,6 +2151,13 @@ class UIManager {
 
     this._pendingAscension = null;
 
+    // FIX(decouple2a): the only place that decides "level up" -> which panel
+    // to show. Player just reports the event; it doesn't know UIManager exists.
+    this.game.events.on("player:levelup", ({ ascension }) => {
+      if (ascension) this.showAscensionChoice();
+      else           this.showLevelUp();
+    });
+
     this._bindUI();
     this._renderLeaderboard();
     this._renderCoinShop();
@@ -2330,9 +2430,7 @@ class UIManager {
     document.querySelectorAll(".btn--upgrade").forEach(btn => {
       btn.addEventListener("click", e => {
         const type = e.currentTarget.dataset.type;
-        if (!type || !(type in this.game.player.upgrades)) return;
-        this.game.player.upgrades[type]++;
-        if (type === "health") this.game.player.health = this.game.player.maxHealth;
+        if (!this.game.player.applyUpgrade(type)) return;
         this.game.fsm.transition(GameState.PLAYING);
         this.game.lastTime = performance.now();
       });
@@ -2354,9 +2452,49 @@ class UIManager {
     return isLandscapeTouch;
   }
 
+  // FIX(decouple2a): small accessor pair so Game (start/saveRun) doesn't
+  // reach into this._pendingAscension directly.
+  hasPendingAscension() { return !!this._pendingAscension; }
+  clearPendingAscension() { this._pendingAscension = null; }
+
   showLevelUp() {
+    this._populateLevelUpGrid();
     this.game.fsm.transition(GameState.LEVEL_UP);
     this.showScreen(GameState.LEVEL_UP, { panel: "levelup" });
+  }
+
+  // FIX(levelup2b): the 7 static buttons in index.html are pure stat scaling,
+  // so runs converge on similar builds. When a build-defining BUILD_MODS pick
+  // is available (level gate met, not already taken), there's a chance to
+  // inject ONE extra choice into the same grid — reusing the existing
+  // upgrade-grid layout/CSS rather than a new panel or allocation-heavy system.
+  _populateLevelUpGrid() {
+    const grid = this._el.levelUp?.querySelector(".upgrade-grid");
+    if (!grid) return;
+    grid.querySelectorAll(".btn--buildmod").forEach(b => b.remove());
+
+    const player    = this.game.player;
+    const available = BUILD_MODS.filter(m => player.stats.level >= m.minLevel && !player.mods[m.id]);
+    if (available.length === 0 || Math.random() >= 0.4) return;
+
+    const pick = available[Math.floor(Math.random() * available.length)];
+    const btn = document.createElement("button");
+    btn.className = "btn btn--upgrade btn--buildmod";
+    btn.setAttribute("role", "listitem");
+    btn.dataset.buildId = pick.id;
+    const title = document.createElement("span");
+    title.className   = "upgrade-title";
+    title.textContent = pick.label;
+    const desc = document.createElement("span");
+    desc.className   = "upgrade-desc";
+    desc.textContent = pick.desc;
+    btn.append(title, desc);
+    btn.addEventListener("click", () => {
+      if (!this.game.player.applyBuildMod(pick.id)) return;
+      this.game.fsm.transition(GameState.PLAYING);
+      this.game.lastTime = performance.now();
+    });
+    grid.appendChild(btn);
   }
 
   showAscensionChoice() {
@@ -2379,7 +2517,7 @@ class UIManager {
         desc.textContent = mod.desc;
         btn.append(title, desc);
         btn.addEventListener("click", () => {
-          this.game.player.mods[mod.id] = true;
+          if (!this.game.player.applyAscensionMod(mod.id)) return;
           this._pendingAscension = null;
           this.game.fsm.transition(GameState.PLAYING);
           this.game.lastTime = performance.now();
@@ -3013,6 +3151,24 @@ class CombatSystem {
                     ctx.trailMgr.register(fb, fb.color);
                   }
                 }
+              } else if (!isCrit && !b.isEnemy && !b._kineticBounced &&
+                         ctx.player.mods?.kineticOverload && Math.random() < 0.25) {
+                // FIX(levelup2b): Kinetic Overload — redirect the bullet at
+                // the next nearest enemy instead of terminating it, reusing
+                // the spatial hash rather than a new targeting system.
+                b._kineticBounced = true;
+                const next = ctx.spatialHash.query(e.x, e.y, 240)
+                  .find(o => o !== e && o.alive);
+                if (next) {
+                  const speed = Math.hypot(b.dx, b.dy);
+                  const ang   = Math.atan2(next.y - e.y, next.x - e.x);
+                  b.x = e.x; b.y = e.y;
+                  b.dx = Math.cos(ang) * speed;
+                  b.dy = Math.sin(ang) * speed;
+                  ctx.spawnParticles(e.x, e.y, "#ffe66d", 4);
+                } else {
+                  hit = true;
+                }
               } else {
                 hit = true;
               }
@@ -3040,6 +3196,9 @@ class CombatSystem {
                 }
                 const lastIdx    = ctx.enemies.length - 1;
                 const movedEnemy = ctx.enemies[lastIdx];
+                if (!b.isEnemy && ctx.player.mods?.corrosiveRounds) {
+                  ctx.triggerCorrosivePulse(e.x, e.y);
+                }
                 ctx.handleEnemyDeath(e, ei);
                 enemyIndexMap.delete(e);
                 if (movedEnemy !== e) enemyIndexMap.set(movedEnemy, ei);
@@ -3096,10 +3255,11 @@ class Game {
       if (typeof saved.shapeOnlyID === "boolean")   this.accessibility.shapeOnlyID    = saved.shapeOnlyID;
     } catch {  }
 
-    this.input = new InputManager(this);
-    this.audio = new AudioEngine();
-    this.meta  = new MetaProgression();
-    this.ui    = new UIManager(this);
+    this.events = new EventBus();
+    this.input  = new InputManager(this);
+    this.audio  = new AudioEngine();
+    this.meta   = new MetaProgression();
+    this.ui     = new UIManager(this);
 
     this.bulletPool   = new ObjectPool(Bullet,   CONFIG.POOL_BULLETS);
     this.particlePool = new ObjectPool(Particle, CONFIG.POOL_PARTICLES);
@@ -3198,6 +3358,7 @@ class Game {
       triggerDamageFlash: (intensity) => this.triggerDamageFlash(intensity),
       vibrate: (ms) => this._vibrate(ms),
       handleEnemyDeath: (enemy, index) => this._handleEnemyDeath(enemy, index),
+      triggerCorrosivePulse: (x, y) => this._triggerCorrosivePulse(x, y),
       recordDeadBullet: () => { this._deadBullets++; },
       setWalls: (arr) => { this.walls = arr; },
       rebuildWallHash: () => this._rebuildWallHash(),
@@ -3281,7 +3442,7 @@ class Game {
     cancelAnimationFrame(this._rafId);
 
     this.clearSavedRun();
-    this.ui._pendingAscension = null;
+    this.ui.clearPendingAscension();
 
     if (this.bullets) {
       for (const b of this.bullets) { b.active = false; this.bulletPool.release(b); }
@@ -3360,7 +3521,7 @@ class Game {
         bossWarning:          this._bossWarning,
         waveTransitionTimer:  this._waveTransitionTimer,
         fsmState:             this.fsm.state,
-        pendingAscension:     !!this.ui._pendingAscension,
+        pendingAscension:     this.ui.hasPendingAscension(),
         player: {
           x: p.x, y: p.y, health: p.health, alive: p.alive,
           stats:               { ...p.stats },
@@ -4188,7 +4349,7 @@ class Game {
 
   // ── "Corruption" arena mechanic ──────────────────────────────────────────
 
-  scheduleCorruptionZone(x, y) {
+  scheduleCorruptionZone(x, y, opts = {}) {
     const motes = [];
     for (let i = 0; i < CONFIG.CORRUPTION_MOTE_COUNT; i++) {
       motes.push({
@@ -4200,11 +4361,22 @@ class Game {
     }
     this.corruptionZones.push({
       x, y,
-      radius:    CONFIG.CORRUPTION_START_RADIUS,
-      maxRadius: CONFIG.CORRUPTION_MAX_RADIUS,
+      radius:    opts.startRadius ?? CONFIG.CORRUPTION_START_RADIUS,
+      maxRadius: opts.maxRadius   ?? CONFIG.CORRUPTION_MAX_RADIUS,
+      lifetime:  opts.lifetime    ?? CONFIG.CORRUPTION_LIFETIME,
       age:       0,
       motes,
     });
+  }
+
+  // FIX(levelup2b): Corrosive Rounds reuses this same zone system for a
+  // small kill-triggered pulse instead of adding a new effect system. A
+  // cooldown on the player keeps kills from spamming overlapping zones.
+  _triggerCorrosivePulse(x, y) {
+    const p = this.player;
+    if (this.gameTime < (p._corrosivePulseReadyAt || 0)) return;
+    p._corrosivePulseReadyAt = this.gameTime + 1.5;
+    this.scheduleCorruptionZone(x, y, { startRadius: 12, maxRadius: 44, lifetime: 3.5 });
   }
 
   _updateCorruptionZones(dt) {
@@ -4229,13 +4401,14 @@ class Game {
         if (dSq < rSq) e.hp -= CONFIG.CORRUPTION_DPS * dt;
       }
 
-      if (z.age >= CONFIG.CORRUPTION_LIFETIME) this.corruptionZones.splice(i, 1);
+      if (z.age >= (z.lifetime ?? CONFIG.CORRUPTION_LIFETIME)) this.corruptionZones.splice(i, 1);
     }
   }
 
   _drawCorruptionZones(ctx) {
     for (const z of this.corruptionZones) {
-      const fadeStart = CONFIG.CORRUPTION_LIFETIME - CONFIG.CORRUPTION_FADE_TIME;
+      const lifetime  = z.lifetime ?? CONFIG.CORRUPTION_LIFETIME;
+      const fadeStart = lifetime - CONFIG.CORRUPTION_FADE_TIME;
       const alpha = z.age > fadeStart
         ? Utils.clamp(1 - (z.age - fadeStart) / CONFIG.CORRUPTION_FADE_TIME, 0, 1)
         : 1;
