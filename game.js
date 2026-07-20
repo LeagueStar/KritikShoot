@@ -592,12 +592,20 @@ class TrailManager {
     if (t.count < this._maxLen) t.count++;
   }
 
-  draw(ctx) {
+  // FIX(visual3c): every registered trail (and there can be many at once
+  // during a boss fight or a high wave with laser/ricochet/split bullets)
+  // unconditionally paid for a soft canvas shadow. Reuses the existing
+  // _lowPowerMode signal instead of adding a separate degradation path.
+  draw(ctx, lowPower = false) {
     for (const [, t] of this._trails) {
       if (t.count < 2) continue;
       ctx.save();
-      ctx.shadowColor = t.color;
-      ctx.shadowBlur  = 8;
+      if (lowPower) {
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.shadowColor = t.color;
+        ctx.shadowBlur  = 8;
+      }
       ctx.strokeStyle = t.color;
       ctx.lineWidth   = 2;
       ctx.lineCap     = "round";
@@ -636,6 +644,14 @@ class AudioEngine {
     }
     if (this._ctx.state === "suspended") this._ctx.resume();
     return this._ctx;
+  }
+
+  // FIX(audio3c): every shot/hit/kill played the exact same fixed frequency
+  // sweep every single time — over a long run that reads as monotonous.
+  // Small random pitch jitter keeps each hit distinct without changing the
+  // character of the sound (still procedural, no new audio assets).
+  _jitter(freq, amount = 0.06) {
+    return freq * (1 + (Math.random() * 2 - 1) * amount);
   }
 
   _play(setupFn, duration = 0.25) {
@@ -731,8 +747,8 @@ class AudioEngine {
     this._play((ctx, gain) => {
       const osc = ctx.createOscillator();
       osc.type = "square";
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(220, ctx.currentTime + 0.12);
+      osc.frequency.setValueAtTime(this._jitter(880), ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(this._jitter(220), ctx.currentTime + 0.12);
       gain.gain.setValueAtTime(0.18, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
       osc.connect(gain);
@@ -746,8 +762,8 @@ class AudioEngine {
     this._play((ctx, gain) => {
       const osc = ctx.createOscillator();
       osc.type = "sine";
-      osc.frequency.setValueAtTime(160, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.3);
+      osc.frequency.setValueAtTime(this._jitter(160, 0.1), ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(this._jitter(40, 0.1), ctx.currentTime + 0.3);
       gain.gain.setValueAtTime(0.5, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
       osc.connect(gain);
@@ -783,7 +799,7 @@ class AudioEngine {
 
       const bpf    = ctx.createBiquadFilter();
       bpf.type     = "bandpass";
-      bpf.frequency.value = 1800;
+      bpf.frequency.value = this._jitter(1800, 0.15);
       bpf.Q.value  = 1.2;
 
       gain.gain.setValueAtTime(0.4, ctx.currentTime);
@@ -800,8 +816,8 @@ class AudioEngine {
     this._play((ctx, gain) => {
       const osc = ctx.createOscillator();
       osc.type  = "sawtooth";
-      osc.frequency.setValueAtTime(1200, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.08);
+      osc.frequency.setValueAtTime(this._jitter(1200), ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(this._jitter(300), ctx.currentTime + 0.08);
       gain.gain.setValueAtTime(0.22, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
       osc.connect(gain);
@@ -817,8 +833,8 @@ class AudioEngine {
       for (const freq of [320, 295]) {
         const osc = ctx.createOscillator();
         osc.type  = "triangle";
-        osc.frequency.setValueAtTime(freq, ctx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.14);
+        osc.frequency.setValueAtTime(this._jitter(freq), ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(this._jitter(80, 0.1), ctx.currentTime + 0.14);
         const g2  = ctx.createGain();
         g2.gain.setValueAtTime(0.18, ctx.currentTime);
         g2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.14);
@@ -831,6 +847,35 @@ class AudioEngine {
       }
       return firstOsc;
     }, 0.15);
+  }
+
+  // FIX(audio3c): level-up had no sound at all — a flat, anticlimactic
+  // moment for what should be a high point of the run. Bright ascending
+  // triad, fully procedural (WebAudio oscillators only, no assets), with a
+  // wider pitch jitter on the ascension variant so it reads as more
+  // significant than a regular level-up.
+  playLevelUp(big = false) {
+    if (this.muted) return;
+    try {
+      const ctx    = this._getCtx();
+      const base   = big ? [523.25, 659.25, 783.99, 1046.5] : [523.25, 659.25, 783.99];
+      const jitter = this._jitter(1, big ? 0.02 : 0.015);
+      base.forEach((freq, i) => {
+        const t   = ctx.currentTime + i * 0.07;
+        const osc = ctx.createOscillator();
+        osc.type  = "triangle";
+        osc.frequency.setValueAtTime(freq * jitter, t);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(big ? 0.26 : 0.2, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
+        osc.connect(g);
+        g.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.4);
+        osc.onended = () => g.disconnect();
+      });
+    } catch (e) {  }
   }
 }
 
@@ -1759,7 +1804,11 @@ class Boss {
       case "telegraph": {
         this._phaseTimer += dt;
         this._flashTimer  += dt;
-        if (this._flashTimer >= 0.12) {
+        // FIX(a11y3b): this ~8Hz strobe was the one flashing effect that
+        // never checked _reducedMotion. Slow it to a gentler pulse instead
+        // of a rapid flicker when the player has that preference set.
+        const flashInterval = this.game._reducedMotion ? 0.32 : 0.12;
+        if (this._flashTimer >= flashInterval) {
           this._flashToggle = !this._flashToggle;
           this._flashTimer  = 0;
         }
@@ -1845,11 +1894,20 @@ class Boss {
     ctx.closePath();
     ctx.fillStyle   = "rgba(5,8,16,0.82)";
     ctx.fill();
+    // FIX(a11y3b): shape-only ID previously only applied to regular enemies —
+    // the boss never got the thicker, high-contrast outline pass.
+    const shapeOnlyID = this.game.accessibility.shapeOnlyID;
     ctx.strokeStyle = drawColor;
-    ctx.lineWidth   = 3.5;
+    ctx.lineWidth   = shapeOnlyID ? 5 : 3.5;
     ctx.shadowColor = drawColor;
     ctx.shadowBlur  = 22;
     ctx.stroke();
+    if (shapeOnlyID) {
+      ctx.shadowBlur  = 0;
+      ctx.lineWidth   = 2;
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.stroke();
+    }
 
     ctx.shadowBlur  = 14;
     ctx.fillStyle   = drawColor;
@@ -2103,12 +2161,19 @@ class InputManager {
 
   _updateJoystick(touch, baseX, baseY, knob) {
     const maxRadius = 40;
+    // FIX(mobile3a): ignore the innermost 12% of travel so tiny thumb jitter
+    // near center doesn't register as movement, then re-normalize so output
+    // still ramps smoothly from 0 to full speed across the remaining travel
+    // instead of jumping straight to a non-zero value at the dead-zone edge.
+    const deadZone = 0.12;
     let dx = touch.clientX - baseX;
     let dy = touch.clientY - baseY;
     const dist = Math.hypot(dx, dy);
     if (dist > maxRadius) { dx = (dx / dist) * maxRadius; dy = (dy / dist) * maxRadius; }
 
-    const norm     = dist > 0 ? Math.min(dist, maxRadius) / maxRadius : 0;
+    const rawNorm = Math.min(dist, maxRadius) / maxRadius;
+    const norm    = rawNorm <= deadZone ? 0 : (rawNorm - deadZone) / (1 - deadZone);
+
     this.joystickX = (dist > 0 ? dx / dist : 0) * norm;
     this.joystickY = (dist > 0 ? dy / dist : 0) * norm;
 
@@ -2154,6 +2219,7 @@ class UIManager {
     // FIX(decouple2a): the only place that decides "level up" -> which panel
     // to show. Player just reports the event; it doesn't know UIManager exists.
     this.game.events.on("player:levelup", ({ ascension }) => {
+      this.game.audio.playLevelUp(ascension);
       if (ascension) this.showAscensionChoice();
       else           this.showLevelUp();
     });
@@ -2164,6 +2230,7 @@ class UIManager {
     this._renderDailyHistory();
     this._updateResumeButton();
     this._layoutCoinShop();
+    this._applyTextScale();
     window.addEventListener("resize", () => this._layoutCoinShop());
 
     const dailyDateLabel = document.getElementById("dailyDateLabel");
@@ -2258,6 +2325,16 @@ class UIManager {
   // or DEPLOY button. On those viewports we dock it into the menu's actual
   // layout flow (appended inside .screen__inner) instead of letting it
   // float; on larger viewports it returns to its normal floating position.
+  // FIX(a11y3b): the Text Size setting previously only reached the
+  // canvas-drawn top HUD (via g.uiScale * g.accessibility.textScale in
+  // drawHUD). All DOM text — menus, level-up/ascension choices, shop,
+  // how-to-play, the accessibility panel itself — only ever scaled with
+  // --ui-scale (viewport-based), never with the player's chosen text size.
+  // This CSS variable is consumed by every font-size rule in style.css.
+  _applyTextScale() {
+    document.documentElement.style.setProperty("--text-scale", this.game.accessibility.textScale);
+  }
+
   _layoutCoinShop() {
     const shop = this._el.coinShop;
     if (!shop) return;
@@ -2358,6 +2435,7 @@ class UIManager {
       btn.addEventListener("click", () => {
         this.game.accessibility.textScale = parseFloat(btn.dataset.scale);
         textOptions.forEach(b => b.classList.toggle("active", b === btn));
+        this._applyTextScale();
         this.game._saveAccessibility();
       });
     });
@@ -3325,7 +3403,7 @@ class Game {
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
         this.saveRunSnapshot();
-        if (this.fsm.is(GameState.PLAYING)) {
+        if (this.fsm.is(GameState.PLAYING) || this.fsm.is(GameState.WAVE_TRANSITION)) {
           this.fsm.transition(GameState.PAUSED);
         }
       }
@@ -3335,7 +3413,7 @@ class Game {
 
     const portraitQuery = window.matchMedia("(orientation: portrait) and (hover: none) and (pointer: coarse)");
     const onPortraitChange = mq => {
-      if (mq.matches && this.fsm.is(GameState.PLAYING)) {
+      if (mq.matches && (this.fsm.is(GameState.PLAYING) || this.fsm.is(GameState.WAVE_TRANSITION))) {
         this.fsm.transition(GameState.PAUSED);
       }
     };
@@ -3985,7 +4063,7 @@ class Game {
     ctx.globalAlpha = 1;
 
     // ── Bullet trails ─────────────────────────────────────────────────────
-    this.trailMgr.draw(ctx);
+    this.trailMgr.draw(ctx, this._lowPowerMode);
 
     // ── Bullets: glow layer ───────────────────────────────────────────────
     for (const b of this.bullets) {
@@ -4305,7 +4383,13 @@ class Game {
   }
 
   spawnParticles(x, y, color, count = 20) {
-    const n = this._lowPowerMode ? Math.max(1, Math.round(count * 0.5)) : count;
+    // FIX(a11y3c): reduced-motion previously only touched hitstop/flash/shake
+    // — particle bursts (the most visually "busy" effect) ignored it
+    // entirely. Reuse the same _lowPowerMode-style count reduction.
+    let n = count;
+    if (this._lowPowerMode)  n = Math.round(n * 0.5);
+    if (this._reducedMotion) n = Math.round(n * 0.35);
+    n = Math.max(1, n);
 
     for (let i = 0; i < n; i++) {
       const angle = Math.random() * Math.PI * 2;
@@ -4317,7 +4401,8 @@ class Game {
     }
 
     if (count >= 15) {
-      const shards = this._lowPowerMode ? 6 : 12;
+      let shards = this._lowPowerMode ? 6 : 12;
+      if (this._reducedMotion) shards = Math.max(2, Math.round(shards * 0.35));
       for (let i = 0; i < shards; i++) {
         const angle = (i / shards) * Math.PI * 2;
         const speed = 6.5 + Math.random() * 2.5;
@@ -4425,6 +4510,21 @@ class Game {
       ctx.beginPath();
       ctx.arc(z.x, z.y, z.radius, 0, Math.PI * 2);
       ctx.fill();
+
+      // FIX(a11y3b): shape-only ID previously never touched corruption zones
+      // — they were readable purely by their purple hue. Add a dashed
+      // high-contrast boundary so the danger radius reads independent of
+      // color perception, matching the enemy/boss outline treatment.
+      if (this.accessibility.shapeOnlyID) {
+        ctx.save();
+        ctx.setLineDash([6, 6]);
+        ctx.strokeStyle = "rgba(255,255,255,0.85)";
+        ctx.lineWidth   = 2;
+        ctx.beginPath();
+        ctx.arc(z.x, z.y, z.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
 
       for (const m of z.motes) {
         const angle = m.angleOffset + this.gameTime * m.speed;
