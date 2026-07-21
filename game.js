@@ -157,23 +157,52 @@ const WEAPON_TUNING = Object.freeze({
 // ── ASCENSION_LEVELS ────────────────────────────────────────────
 const ASCENSION_LEVELS = Object.freeze([10, 20, 30]);
 
-const ASCENSION_MODS = Object.freeze([
-  {
-    id: "ricochet", weapon: "default",
+// FIX(bigswing4.3): branching ascension path. Tier1 (level 10) locks in a
+// base mod; tier2 (level 20) offers two specializations of THAT base mod
+// only (not the other two paths); tier3 (level 30) is a single capstone
+// whose effect depends on which tier2 specialization was taken. Two players
+// who diverge at tier1/tier2 end up with visibly different wave-30 builds.
+const ASCENSION_TREE = {
+  ricochet: {
+    id: "ricochet", weapon: "default", masteryId: "ricochetMastery",
     label: "\u{1F501} Ricochet Rounds",
     desc: "Gun bullets bounce off one wall instead of dying on contact.",
+    tier2: [
+      { id: "ricochetChain",   label: "\u{1F300} Chain Ricochet",     desc: "Bullets bounce off two walls instead of one." },
+      { id: "ricochetCorrupt", label: "\u{2623}\u{FE0F} Volatile Ricochet", desc: "Bullets gain an extra bounce while inside a corruption zone." },
+    ],
+    tier3: { label: "\u{1F525} Ricochet Mastery", desc: "Your ricochet path reaches its final form." },
   },
-  {
-    id: "detonatorPellets", weapon: "spread",
+  detonatorPellets: {
+    id: "detonatorPellets", weapon: "spread", masteryId: "detonatorMastery",
     label: "\u{1F4A3} Detonator Pellets",
     desc: "Shotgun pellets chain-explode in a small radius on enemy kill.",
+    tier2: [
+      { id: "detonatorWide",    label: "\u{1F4A5} Wide Blast",       desc: "Chain-explosion radius +60%." },
+      { id: "detonatorCorrupt", label: "\u{2623}\u{FE0F} Corrosive Blast", desc: "Explosions inside a corruption zone deal double damage." },
+    ],
+    tier3: { label: "\u{1F525} Detonator Mastery", desc: "Your detonator path reaches its final form." },
   },
-  {
-    id: "beamSplit", weapon: "laser",
+  beamSplit: {
+    id: "beamSplit", weapon: "laser", masteryId: "beamMastery",
     label: "\u{1F374} Beam Split",
     desc: "Laser bolts fork into two thinner beams on their first pierce.",
+    tier2: [
+      { id: "beamTriple",  label: "\u{1F531} Triple Split",     desc: "Laser forks into three beams instead of two." },
+      { id: "beamCorrupt", label: "\u{2623}\u{FE0F} Amplified Beam", desc: "Beams pierce one extra enemy while inside a corruption zone." },
+    ],
+    tier3: { label: "\u{1F525} Beam Mastery", desc: "Your beam path reaches its final form." },
   },
-]);
+};
+
+// Flat set of every valid ascension flag (base + tier2 + mastery ids), used
+// by Player.applyAscensionMod for validation.
+const ASCENSION_ID_SET = new Set();
+for (const base of Object.values(ASCENSION_TREE)) {
+  ASCENSION_ID_SET.add(base.id);
+  for (const t2 of base.tier2) ASCENSION_ID_SET.add(t2.id);
+  ASCENSION_ID_SET.add(base.masteryId);
+}
 
 // FIX(levelup2b): build-defining level-up choices. Unlike the 7 numeric
 // upgrades, each of these changes bullet behavior or creates a real
@@ -1246,6 +1275,11 @@ class Player {
     const len = Math.hypot(dx, dy);
     if (len > 0) { dx /= len; dy /= len; }
 
+    const wantsShoot = input.isShooting || input._shootBuffer;
+    // FIX(bigswing4.2): record a compact ghost-replay sample (movement/aim/
+    // shoot only, not full game state) before movement/collision is applied.
+    this.game._recordGhostTick(dx, dy, this._cachedAimAngle, wantsShoot);
+
     const nx = this.x + dx * this.speed * dt;
     const ny = this.y + dy * this.speed * dt;
     if (!this.game.checkWallCollision(nx, this.y, this.size)) this.x = nx;
@@ -1254,7 +1288,6 @@ class Player {
     this.x = Utils.clamp(this.x, this.size, this.game.width  - this.size);
     this.y = Utils.clamp(this.y, this.size, this.game.height - this.size);
 
-    const wantsShoot = input.isShooting || input._shootBuffer;
     if (wantsShoot && (this.game.gameTime - this._lastShot) >= this.shootDelay) {
       input._shootBuffer = false;
       this._shoot(input);
@@ -1348,7 +1381,7 @@ class Player {
   }
 
   applyAscensionMod(id) {
-    if (!id || !ASCENSION_MODS.some(m => m.id === id)) return false;
+    if (!id || !ASCENSION_ID_SET.has(id)) return false;
     this.mods[id] = true;
     return true;
   }
@@ -2576,26 +2609,26 @@ class UIManager {
   }
 
   showAscensionChoice() {
-    const pair = this._pickAscensionPair();
-    this._pendingAscension = pair;
+    const options = this._buildAscensionOptions();
+    this._pendingAscension = options;
 
     const grid = this._el.ascension?.querySelector("#ascensionGrid");
     if (grid) {
       grid.innerHTML = "";
-      for (const mod of pair) {
+      for (const opt of options) {
         const btn = document.createElement("button");
         btn.className = "btn btn--upgrade btn--ascension";
         btn.setAttribute("role", "listitem");
-        btn.dataset.modId = mod.id;
+        btn.dataset.modId = opt.id;
         const title = document.createElement("span");
         title.className   = "upgrade-title";
-        title.textContent = mod.label;
+        title.textContent = opt.label;
         const desc = document.createElement("span");
         desc.className   = "upgrade-desc";
-        desc.textContent = mod.desc;
+        desc.textContent = opt.desc;
         btn.append(title, desc);
         btn.addEventListener("click", () => {
-          if (!this.game.player.applyAscensionMod(mod.id)) return;
+          if (!this.game.player.applyAscensionMod(opt.id)) return;
           this._pendingAscension = null;
           this.game.fsm.transition(GameState.PLAYING);
           this.game.lastTime = performance.now();
@@ -2608,13 +2641,29 @@ class UIManager {
     this.showScreen(GameState.LEVEL_UP, { panel: "ascension" });
   }
 
-  _pickAscensionPair() {
-    const pool = [...ASCENSION_MODS];
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
+  // FIX(bigswing4.3): tier is derived from which ASCENSION_LEVELS milestone
+  // the player just hit. Tier1 offers two random base paths; tier2 offers
+  // only the two specializations of whichever base path was already chosen;
+  // tier3 offers the single capstone for that path.
+  _buildAscensionOptions() {
+    const player = this.game.player;
+    const tier   = ASCENSION_LEVELS.indexOf(player.stats.level);
+
+    if (tier === 0) {
+      const bases = Object.values(ASCENSION_TREE).sort(() => Math.random() - 0.5);
+      return bases.slice(0, 2).map(base => ({ id: base.id, label: base.label, desc: base.desc }));
     }
-    return pool.slice(0, 2);
+
+    const chosenBaseId = Object.keys(ASCENSION_TREE).find(id => player.mods[id]);
+    const base = ASCENSION_TREE[chosenBaseId];
+    if (!base) return []; // defensive: no tier1 pick recorded, nothing to branch from
+
+    if (tier === 1) {
+      return base.tier2.map(opt => ({ id: opt.id, label: opt.label, desc: opt.desc }));
+    }
+
+    // tier === 2 (level 30 capstone)
+    return [{ id: base.masteryId, label: base.tier3.label, desc: base.tier3.desc }];
   }
 
   _finalizeRun() {
@@ -2623,6 +2672,7 @@ class UIManager {
     try { name = localStorage.getItem("ks_nickname") || "Ghost"; } catch { name = "Ghost"; }
     this._saveScore(name, g.wave, g.gameTime, g.player.stats.level);
     this._renderLeaderboard();
+    g._saveGhostIfBest();
     const coinsEarned = g.meta.awardCoins(g.wave, g.gameTime);
     this._lastCoinsEarned = coinsEarned;
     return coinsEarned;
@@ -2876,7 +2926,15 @@ class UIManager {
     ctx.fillStyle = "rgba(232,240,254,0.7)";
     ctx.fillText(`Time: ${g.gameTime.toFixed(1)}s   Level ${p.stats.level}`, m, m + lh);
 
-    const hbY = m + lh * 2 + 6;
+    // FIX(bigswing4.2): show what the local ghost is racing toward. Pushes
+    // the health bar down one line so it never overlaps.
+    const showGhostLine = g.dailyMode && !!g.ghostPlayback;
+    if (showGhostLine) {
+      ctx.fillStyle = "#5ad1ff";
+      ctx.fillText(`\u{1F47B} Ghost PB: Wave ${g.ghostPlayback.wave}`, m, m + lh * 2);
+    }
+
+    const hbY = m + lh * (showGhostLine ? 3 : 2) + 6;
     const hbW = 180 * s;
     const hbH = 10  * s;
     const hpR = Utils.clamp(p.health / p.maxHealth, 0, 1);
@@ -3072,6 +3130,12 @@ class WaveSystem {
   static BOSS_WAVE_INTERVAL = 5;
   static ENV_DESTRUCTION_START_WAVE = 10;
   static ENV_DESTRUCTION_INTERVAL   = 3;
+  // FIX(bigswing4.1): corruption used to only ever appear from a boss kill
+  // (a "wave-10 add-on"). It now also spreads periodically on its own once
+  // waves get dangerous, offset from the env-destruction cadence so the two
+  // don't always land on the same wave.
+  static CORRUPTION_PERIODIC_START_WAVE = 12;
+  static CORRUPTION_PERIODIC_INTERVAL   = 4;
 
   isBossWave(wave) {
     return wave % WaveSystem.BOSS_WAVE_INTERVAL === 0;
@@ -3080,6 +3144,11 @@ class WaveSystem {
   shouldTriggerEnvironmentalDestruction(wave) {
     return wave > WaveSystem.ENV_DESTRUCTION_START_WAVE &&
       (wave - WaveSystem.ENV_DESTRUCTION_START_WAVE) % WaveSystem.ENV_DESTRUCTION_INTERVAL === 0;
+  }
+
+  shouldTriggerPeriodicCorruption(wave) {
+    return wave > WaveSystem.CORRUPTION_PERIODIC_START_WAVE &&
+      (wave - WaveSystem.CORRUPTION_PERIODIC_START_WAVE) % WaveSystem.CORRUPTION_PERIODIC_INTERVAL === 0;
   }
 
     spawnWave(ctx) {
@@ -3138,6 +3207,9 @@ class WaveSystem {
     if (this.shouldTriggerEnvironmentalDestruction(ctx.wave)) {
       ctx.scheduleEnvDestruction();
     }
+    if (this.shouldTriggerPeriodicCorruption(ctx.wave)) {
+      ctx.schedulePeriodicCorruption();
+    }
   }
 }
 
@@ -3168,8 +3240,19 @@ class CombatSystem {
           }
         }
         ctx.spawnParticles(b.x, b.y, b.color, 5);
-        if (!b.isEnemy && b.weaponType === "default" && !b._ricocheted && ctx.player.mods?.ricochet) {
-          b._ricocheted = true;
+        // FIX(bigswing4.3): ricochet bounce cap now depends on the branching
+        // path — base mod = 1 bounce, Chain Ricochet = 2, and Volatile
+        // Ricochet grants a bonus bounce specifically while inside a
+        // corruption zone (a distinct, situational interaction rather than
+        // a flat number bump).
+        const mods = ctx.player.mods || {};
+        let maxBounces = mods.ricochet ? 1 : 0;
+        if (mods.ricochetChain) maxBounces = 2;
+        if (mods.ricochetCorrupt && ctx.isInCorruption(b.x, b.y)) maxBounces += 1;
+
+        if (!b.isEnemy && b.weaponType === "default" && (b._ricochetCount || 0) < maxBounces) {
+          b._ricochetCount = (b._ricochetCount || 0) + 1;
+          if (mods.ricochetMastery) b._ricochetBoosted = true;
           const hitSide = bx0 < wall.x || bx0 > wall.x + wall.w;
           if (hitSide) b.dx = -b.dx; else b.dy = -b.dy;
           b.x = bx0; b.y = by0;
@@ -3209,25 +3292,40 @@ class CombatSystem {
             const t = Utils.sweepCircle(bx0, by0, b.x, b.y, e.x, e.y, b.size + e.size);
             if (t >= 0) {
               const isCrit  = Math.random() < ctx.player.critChance;
-              const dmgDealt = b.damage * (isCrit ? 2 : 1);
+              let dmgDealt = b.damage * (isCrit ? 2 : 1);
+              if (b._ricochetBoosted) dmgDealt *= 1.5;
               e.hp -= dmgDealt;
               ctx.damageNumbers.push(DamageNumber.get(b.x, b.y, Math.ceil(dmgDealt), isCrit, false));
               if (b.piercing) {
                 b.hitCount++;
                 if (b.hitCount >= b.maxPierce) hit = true;
-                if (b.hitCount === 1 && b.weaponType === "laser" && !b._forked && ctx.player.mods?.beamSplit) {
+                const mods = ctx.player.mods || {};
+                if (b.hitCount === 1 && b.weaponType === "laser" && !b._forked && mods.beamSplit) {
                   b._forked = true;
                   const baseAngle = Math.atan2(b.dy, b.dx);
                   const speed     = Math.hypot(b.dx, b.dy);
-                  for (const off of [-0.25, 0.25]) {
+                  // FIX(bigswing4.3): Triple Split forks into 3 beams
+                  // instead of 2; Beam Mastery (when paired with Triple
+                  // Split) boosts each fork's damage.
+                  const offsets = mods.beamTriple ? [-0.3, 0, 0.3] : [-0.25, 0.25];
+                  const forkDmgMult = (mods.beamMastery && mods.beamTriple) ? 1.2 : 1;
+                  for (const off of offsets) {
                     const ang = baseAngle + off;
                     const fb  = ctx.bulletPool.get();
                     fb.init(b.x, b.y, Math.cos(ang) * speed, Math.sin(ang) * speed,
-                      b.size * 0.6, b.color, b.damage * 0.5, false, true, b.maxPierce, "laser");
+                      b.size * 0.6, b.color, b.damage * 0.5 * forkDmgMult, false, true, b.maxPierce, "laser");
                     fb._forked = true;
                     ctx.bullets.push(fb);
                     ctx.trailMgr.register(fb, fb.color);
                   }
+                }
+                // FIX(bigswing4.1): Amplified Beam — grants one extra pierce
+                // the moment a beam is inside a corruption zone, applied
+                // once per bullet so it can't compound every frame.
+                if (mods.beamCorrupt && !b._corruptPierceGranted && ctx.isInCorruption(e.x, e.y)) {
+                  b._corruptPierceGranted = true;
+                  b.maxPierce += 1;
+                  if (b.hitCount >= b.maxPierce) hit = false;
                 }
               } else if (!isCrit && !b.isEnemy && !b._kineticBounced &&
                          ctx.player.mods?.kineticOverload && Math.random() < 0.25) {
@@ -3259,22 +3357,46 @@ class CombatSystem {
               }
               const ei = enemyIndexMap.get(e);
               if (e.hp <= 0 && ei !== undefined) {
-                if (!b.isEnemy && b.weaponType === "spread" && ctx.player.mods?.detonatorPellets) {
-                  const splashR  = 70;
-                  const splashRSq = splashR * splashR;
+                const mods = ctx.player.mods || {};
+                if (!b.isEnemy && b.weaponType === "spread" && mods.detonatorPellets) {
+                  // FIX(bigswing4.3): Wide Blast/Corrosive Blast are real,
+                  // situational branches rather than another flat number —
+                  // Corrosive Blast's bonus only applies inside a corruption
+                  // zone, Mastery's knockback/seed depends on which tier2
+                  // path was actually taken.
+                  let splashR = 70;
+                  if (mods.detonatorWide) splashR *= 1.6;
+                  const splashRSq  = splashR * splashR;
+                  const inCorrupt  = ctx.isInCorruption(e.x, e.y);
+                  const dmgMult    = (mods.detonatorCorrupt && inCorrupt) ? 2 : 1;
                   for (const other of ctx.spatialHash.query(e.x, e.y, splashR)) {
                     if (other === e || !other.alive) continue;
                     if (Utils.distSq(e.x, e.y, other.x, other.y) <= splashRSq) {
-                      const splashDmg = b.damage * 0.5;
+                      const splashDmg = b.damage * 0.5 * dmgMult;
                       other.hp -= splashDmg;
                       ctx.damageNumbers.push(DamageNumber.get(other.x, other.y, Math.ceil(splashDmg), false, false));
+                      if (mods.detonatorMastery && mods.detonatorWide) {
+                        const ang = Math.atan2(other.y - e.y, other.x - e.x);
+                        other.x += Math.cos(ang) * 14;
+                        other.y += Math.sin(ang) * 14;
+                      }
                     }
                   }
                   ctx.spawnParticles(e.x, e.y, "#ff9f43", 10);
+                  if (mods.detonatorMastery && mods.detonatorCorrupt) ctx.triggerCorrosivePulse(e.x, e.y);
                 }
                 const lastIdx    = ctx.enemies.length - 1;
                 const movedEnemy = ctx.enemies[lastIdx];
                 if (!b.isEnemy && ctx.player.mods?.corrosiveRounds) {
+                  ctx.triggerCorrosivePulse(e.x, e.y);
+                }
+                // Ricochet/Beam mastery: a kill scored via the mod's
+                // corruption-branch bullet also seeds a corrosive pulse,
+                // tying every ascension path back into the same mechanic.
+                if (!b.isEnemy && b._ricochetBoosted && ctx.player.mods?.ricochetMastery && ctx.player.mods?.ricochetCorrupt) {
+                  ctx.triggerCorrosivePulse(e.x, e.y);
+                }
+                if (!b.isEnemy && b._corruptPierceGranted && ctx.player.mods?.beamMastery && ctx.player.mods?.beamCorrupt) {
                   ctx.triggerCorrosivePulse(e.x, e.y);
                 }
                 ctx.handleEnemyDeath(e, ei);
@@ -3373,6 +3495,12 @@ class Game {
     this.dailyMode = false;
     this.rng       = Math.random;
 
+    // FIX(bigswing4.2): ghost replay state. ghostRecording captures the
+    // current run's compact input stream (daily mode only); ghostPlayback
+    // holds the best local ghost for today's date, replayed visually.
+    this.ghostRecording = null;
+    this.ghostPlayback  = null;
+
     this._FIXED_STEP  = 1 / 60;
     this._accumulator = 0;
     this._hitStopFrames = 0;
@@ -3437,6 +3565,7 @@ class Game {
       vibrate: (ms) => this._vibrate(ms),
       handleEnemyDeath: (enemy, index) => this._handleEnemyDeath(enemy, index),
       triggerCorrosivePulse: (x, y) => this._triggerCorrosivePulse(x, y),
+      isInCorruption: (x, y) => this.isInCorruption(x, y),
       recordDeadBullet: () => { this._deadBullets++; },
       setWalls: (arr) => { this.walls = arr; },
       rebuildWallHash: () => this._rebuildWallHash(),
@@ -3453,6 +3582,7 @@ class Game {
       createBoss: () => new Boss(game),
       spawnWalls: () => game._spawnWalls(),
       scheduleEnvDestruction: () => game.scheduleEnvironmentalDestruction(),
+      schedulePeriodicCorruption: () => game._schedulePeriodicCorruption(),
       addShake: (amount) => game._addShake(amount),
       get wave()               { return game.wave; },
       set wave(v)               { game.wave = v; },
@@ -3534,6 +3664,11 @@ class Game {
     this.rng = this.dailyMode
       ? Utils.createSeededRNG(`kritikshoot-daily-${this.dailySeedDate}`)
       : Math.random;
+
+    // FIX(bigswing4.2): fresh recorder for this run, and load today's best
+    // ghost (if any) to race against. Both are no-ops outside daily mode.
+    this.ghostRecording = this.dailyMode ? { samples: [], tickCounter: 0 } : null;
+    this._loadGhost();
 
     this.player    = new Player(this);
     this.enemies   = [];
@@ -3654,6 +3789,12 @@ class Game {
     this.rng = this.dailyMode
       ? Utils.createSeededRNG(`kritikshoot-daily-${this.dailySeedDate}`)
       : Math.random;
+
+    // FIX(bigswing4.2): the exact mid-run recording isn't persisted in the
+    // snapshot, so a resumed run starts a fresh (shorter) recording rather
+    // than losing ghost saving entirely. Best-ghost playback reloads as normal.
+    this.ghostRecording = this.dailyMode ? { samples: [], tickCounter: 0 } : null;
+    this._loadGhost();
 
     this.player = new Player(this);
     this.player.x       = snap.player.x;
@@ -3841,6 +3982,7 @@ class Game {
     this._updateCorruptionZones(dt);
 
     this.player.update(dt, this.input);
+    if (this.dailyMode) this._updateGhostPlayback(dt);
 
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
@@ -4108,6 +4250,9 @@ class Game {
       const barH = 5  * this.uiScale;
       ctx.fillRect(rx - barW / 2, ry - e.size - barH - 6, barW * Utils.clamp(e.hp / e.maxHp, 0, 1), barH);
     }
+
+    // ── Ghost replay (Daily Challenge) ──────────────────────────────────────
+    if (this.dailyMode && this.ghostPlayback && this.ghostPlayback.alive) this._drawGhost(ctx);
 
     // ── Player ─────────────────────────────────────────────────────────
     this.player.draw(ctx, this.input, alpha);
@@ -4434,6 +4579,56 @@ class Game {
 
   // ── "Corruption" arena mechanic ──────────────────────────────────────────
 
+  // FIX(bigswing4.1): shared helper so ascension mod interactions (and
+  // anything else) can check "is this point inside an active corruption
+  // zone" without duplicating the distance check.
+  isInCorruption(x, y) {
+    for (const z of this.corruptionZones) {
+      if (Utils.distSq(x, y, z.x, z.y) <= z.radius * z.radius) return true;
+    }
+    return false;
+  }
+
+  // FIX(bigswing4.1): corruption is now load-bearing for arena shape, not
+  // just a damage-over-time hazard. Reuses the existing crack-warning /
+  // _pendingDestruction pipeline instead of a new destruction system —
+  // cover caught inside a matured corruption zone gets marked the same way
+  // scheduleEnvironmentalDestruction() already does, opening (or, since the
+  // zone itself blocks safe passage while active, effectively closing)
+  // choke points as a run progresses.
+  _reshapeCorruptionArena(z) {
+    const rSq = z.maxRadius * z.maxRadius;
+    const candidates = [...this.walls, ...this.crates].filter(o => {
+      if (o._envDestructAt !== undefined) return false;
+      const ox = o.x + o.w / 2, oy = o.y + o.h / 2;
+      return Utils.distSq(ox, oy, z.x, z.y) <= rSq;
+    });
+    if (candidates.length === 0) return;
+
+    const WARN_DURATION = 1.6;
+    const count = Math.min(candidates.length, 2);
+    for (let i = 0; i < count; i++) {
+      const target = candidates[i];
+      target._envWarnStart  = this.gameTime;
+      target._envDestructAt = this.gameTime + WARN_DURATION;
+      this._pendingDestruction.push(target);
+    }
+  }
+
+  // FIX(bigswing4.1): periodic corruption spawn — a random in-bounds spot,
+  // away from the player so it doesn't spawn on top of them. Uses this.rng()
+  // (not Math.random) so it stays deterministic/seeded in Daily Challenge.
+  _schedulePeriodicCorruption() {
+    const margin = 80;
+    let x, y, tries = 0;
+    do {
+      x = margin + this.rng() * (this.width  - margin * 2);
+      y = margin + this.rng() * (this.height - margin * 2);
+      tries++;
+    } while (tries < 6 && Utils.distSq(x, y, this.player.x, this.player.y) < 200 * 200);
+    this.scheduleCorruptionZone(x, y);
+  }
+
   scheduleCorruptionZone(x, y, opts = {}) {
     const motes = [];
     for (let i = 0; i < CONFIG.CORRUPTION_MOTE_COUNT; i++) {
@@ -4451,6 +4646,12 @@ class Game {
       lifetime:  opts.lifetime    ?? CONFIG.CORRUPTION_LIFETIME,
       age:       0,
       motes,
+      // FIX(bigswing4.1): only "core" corruption zones (boss-death/periodic
+      // spawns) reshape the arena — the small kill-triggered pulses from
+      // Corrosive Rounds/mastery mods stay purely a damage effect so every
+      // kill doesn't start chewing through the map.
+      reshapesArena: opts.reshapesArena !== false,
+      _reshaped: false,
     });
   }
 
@@ -4461,7 +4662,85 @@ class Game {
     const p = this.player;
     if (this.gameTime < (p._corrosivePulseReadyAt || 0)) return;
     p._corrosivePulseReadyAt = this.gameTime + 1.5;
-    this.scheduleCorruptionZone(x, y, { startRadius: 12, maxRadius: 44, lifetime: 3.5 });
+    this.scheduleCorruptionZone(x, y, { startRadius: 12, maxRadius: 44, lifetime: 3.5, reshapesArena: false });
+  }
+
+  // ── Ghost Replay (Daily Challenge) ─────────────────────────────────────
+  // FIX(bigswing4.2): records a compact input event stream (movement/aim/
+  // shoot, not full game state) at 20Hz using the same seeded mulberry32 RNG
+  // and localStorage persistence the rest of daily mode already relies on.
+  // Fully local — no server, no new dependency.
+  _recordGhostTick(dx, dy, aimAngle, shooting) {
+    const rec = this.ghostRecording;
+    if (!rec) return;
+    rec.tickCounter++;
+    if (rec.tickCounter % 3 !== 0) return; // ~20Hz at a 60Hz fixed step
+    rec.samples.push(
+      Math.round(dx * 100) / 100,
+      Math.round(dy * 100) / 100,
+      Math.round(aimAngle * 1000) / 1000,
+      shooting ? 1 : 0,
+    );
+  }
+
+  _loadGhost() {
+    this.ghostPlayback = null;
+    if (!this.dailyMode) return;
+    try {
+      const raw = localStorage.getItem(`ks_ghost_best_${this.dailySeedDate}`);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (!data || !Array.isArray(data.samples) || data.samples.length < 4) return;
+      this.ghostPlayback = {
+        samples: data.samples,
+        wave: data.wave || 0,
+        idx: 0, tickCounter: 0,
+        dx: 0, dy: 0, aim: 0, shoot: false,
+        x: this.width / 2, y: this.height / 2,
+        alive: true,
+      };
+    } catch (e) {  }
+  }
+
+  _updateGhostPlayback(dt) {
+    const g = this.ghostPlayback;
+    if (!g || !g.alive) return;
+    if (g.tickCounter % 3 === 0) {
+      const i = g.idx * 4;
+      if (i >= g.samples.length) { g.alive = false; return; }
+      g.dx = g.samples[i]; g.dy = g.samples[i + 1];
+      g.aim = g.samples[i + 2]; g.shoot = g.samples[i + 3] === 1;
+      g.idx++;
+    }
+    g.tickCounter++;
+    // Ghost is a visual pace reference, not a fully simulated competitor —
+    // it moves at base speed with no collision, so it can't be blocked or
+    // interacted with.
+    const speed = CONFIG.PLAYER_BASE_SPEED;
+    g.x = Utils.clamp(g.x + g.dx * speed * dt, 20, this.width  - 20);
+    g.y = Utils.clamp(g.y + g.dy * speed * dt, 20, this.height - 20);
+  }
+
+  // Called at run end (game over or quit) — saves this run's recording as
+  // the new best-local-ghost for today if it outlasted (or matched and beat
+  // on time) the previous best.
+  _saveGhostIfBest() {
+    if (!this.dailyMode || !this.ghostRecording || this.ghostRecording.samples.length < 4) return;
+    const key = `ks_ghost_best_${this.dailySeedDate}`;
+    try {
+      const prevRaw = localStorage.getItem(key);
+      if (prevRaw) {
+        const prev = JSON.parse(prevRaw);
+        const prevScore = (prev.wave || 0) * 100000 + (prev.gameTime || 0);
+        const thisScore = this.wave * 100000 + this.gameTime;
+        if (thisScore <= prevScore) return;
+      }
+      localStorage.setItem(key, JSON.stringify({
+        wave: this.wave,
+        gameTime: this.gameTime,
+        samples: this.ghostRecording.samples,
+      }));
+    } catch (e) {  }
   }
 
   _updateCorruptionZones(dt) {
@@ -4471,6 +4750,11 @@ class Game {
       z.age   += dt;
       z.radius = Math.min(z.maxRadius, z.radius + CONFIG.CORRUPTION_SPREAD_RATE * dt);
       const rSq = z.radius * z.radius;
+
+      if (z.reshapesArena && !z._reshaped && z.radius >= z.maxRadius * 0.5) {
+        z._reshaped = true;
+        this._reshapeCorruptionArena(z);
+      }
 
       if (this.player.alive && this.player.buffs.shield <= 0) {
         const dSq = Utils.distSq(this.player.x, this.player.y, z.x, z.y);
@@ -4538,6 +4822,33 @@ class Game {
       }
       ctx.restore();
     }
+  }
+
+  // FIX(bigswing4.2): lightweight visual reference, not a full player
+  // re-render — a translucent circle + direction wedge + label is enough to
+  // race against without pulling in Player's draw method/animation state.
+  _drawGhost(ctx) {
+    const g = this.ghostPlayback;
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+    ctx.fillStyle   = "#5ad1ff";
+    ctx.strokeStyle = "#5ad1ff";
+    ctx.lineWidth   = 2;
+    ctx.beginPath();
+    ctx.arc(g.x, g.y, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(g.x + Math.cos(g.aim) * 18, g.y + Math.sin(g.aim) * 18);
+    ctx.lineTo(g.x + Math.cos(g.aim + 2.5) * 9, g.y + Math.sin(g.aim + 2.5) * 9);
+    ctx.lineTo(g.x + Math.cos(g.aim - 2.5) * 9, g.y + Math.sin(g.aim - 2.5) * 9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 0.8;
+    ctx.font = `700 ${11 * this.uiScale * this.accessibility.textScale}px ${CONFIG.HUD_FONT}`;
+    ctx.textAlign = "center";
+    ctx.fillText("GHOST", g.x, g.y - 22);
+    ctx.textAlign = "left";
+    ctx.restore();
   }
 
   checkWallCollision(x, y, size) {
