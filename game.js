@@ -37,6 +37,33 @@ const CONFIG = Object.freeze({
   SHAKE_FREQ:           55,
   SHAKE_THUD_FREQ:      10,
 
+  // FIX(polish51): per-weapon hit-stop/shake tuning — GUN stays snappy and
+  // barely interrupts the frame, SHOTGUN leans on a heavier hit-stop plus a
+  // widening punch when multiple pellets connect in the same frame, LASER
+  // is deliberately kept low on both so continuous beam contact reads as
+  // sustained pressure rather than a string of discrete impacts.
+  WEAPON_FEEL: {
+    default: { hitStop: 0, critHitStop: 1, shake: 1.4, critShake: 3.2, big: false },
+    spread:  { hitStop: 2, critHitStop: 3, shake: 3.5, critShake: 6.5, big: true, pelletShakeStep: 1.15, pelletShakeCapHits: 4 },
+    laser:   { hitStop: 0, critHitStop: 0, shake: 0.7, critShake: 1.3, big: false },
+  },
+
+  // FIX(polish52): subtle camera lead toward aim/movement direction — capped
+  // magnitude and smoothed so fast play reads as more kinetic without ever
+  // feeling disorienting. Blend favors aim slightly over raw movement.
+  CAMERA_LEAD_MAX:         22,
+  CAMERA_LEAD_AIM_WEIGHT:  0.6,
+  CAMERA_LEAD_MOVE_WEIGHT: 0.4,
+  CAMERA_LEAD_SMOOTH:      7,
+
+  // FIX(polish55): once enemy counts get large, generic hit/death particles
+  // start burying real threats (bosses, projectiles) in visual noise. Fade
+  // and cull them past this density band; damage numbers and boss telegraphs
+  // are never touched by this.
+  PARTICLE_DENSITY_CULL_START: 35,
+  PARTICLE_DENSITY_CULL_MAX:   70,
+  PARTICLE_DENSITY_MIN_ALPHA:  0.32,
+
   PARTICLE_FRICTION:    0.88,
   PARTICLE_DECAY:       0.94,
 
@@ -748,6 +775,26 @@ class AudioEngine {
     } catch (e) {  }
   }
 
+  // FIX(polish54): brief GainNode ramp-down/back-up on the ambient bed so a
+  // hit-stop frame or a player-damage flash reads clearly against it,
+  // instead of the ambient layer washing the impact out. No new nodes are
+  // created here — it rides the same master gain startAmbient() already set
+  // up, so muted/ambient-off states are naturally respected.
+  duckAmbient(depth = 0.55, holdSeconds = 0.09) {
+    if (!this._ambientNodes || this.muted) return;
+    try {
+      const g       = this._ambientNodes.gain.gain;
+      const ctx     = this._ambientNodes.gain.context;
+      const now     = ctx.currentTime;
+      const target  = this._ambientLevel * CONFIG.AMBIENT_MAX_GAIN;
+      const duckedTo = target * (1 - depth);
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(g.value, now);
+      g.linearRampToValueAtTime(duckedTo, now + 0.03);
+      g.linearRampToValueAtTime(target, now + 0.03 + holdSeconds);
+    } catch (e) {  }
+  }
+
   setAmbientIntensity(level) {
     this._ambientLevel = Utils.clamp(level, 0, 1);
     if (!this._ambientNodes) return;
@@ -1132,9 +1179,15 @@ class Particle {
     this.life -= dt;
   }
 
-  draw(ctx, alpha) {
+  // FIX(polish55): densityMult (1 = normal) is computed once per frame from
+  // current enemy count, not per particle, and fades/culls generic particles
+  // at high enemy density so real threats stay readable. Never applied to
+  // damage numbers or boss telegraphs — those are drawn through a separate
+  // path untouched by this multiplier.
+  draw(ctx, alpha, densityMult = 1) {
     if (!this.active || this.size < 0.3) return;
-    const lifeAlpha = Math.max(0, this.life / this.maxLife);
+    if (densityMult < 1 && this.size < 1.2) return;
+    const lifeAlpha = Math.max(0, this.life / this.maxLife) * densityMult;
     if (lifeAlpha < 0.01) return;
     const rx   = Utils.lerp(this.prevX, this.x, alpha);
     const ry   = Utils.lerp(this.prevY, this.y, alpha);
@@ -3220,6 +3273,11 @@ class CombatSystem {
     const enemyIndexMap = new Map();
     for (let i = 0; i < ctx.enemies.length; i++) enemyIndexMap.set(ctx.enemies[i], i);
 
+    // FIX(polish51): fresh every frame, never allocated inside the per-
+    // bullet loop below — only used to widen SHOTGUN's punch when several
+    // pellets connect in the same fixed-step frame.
+    const weaponHitsThisFrame = { default: 0, spread: 0, laser: 0 };
+
     for (let i = 0; i < ctx.bullets.length; i++) {
       const b = ctx.bullets[i];
       if (!b.active) continue;
@@ -3296,6 +3354,25 @@ class CombatSystem {
               if (b._ricochetBoosted) dmgDealt *= 1.5;
               e.hp -= dmgDealt;
               ctx.damageNumbers.push(DamageNumber.get(b.x, b.y, Math.ceil(dmgDealt), isCrit, false));
+
+              // FIX(polish51): per-weapon hit feel — GUN only interrupts the
+              // frame on a crit, SHOTGUN gets a heavier hit-stop plus a
+              // widening shake as more pellets connect this frame, LASER
+              // stays low on both so continuous beam contact reads as
+              // sustained pressure rather than discrete impacts.
+              if (!b.isEnemy) {
+                const feel = CONFIG.WEAPON_FEEL[b.weaponType] || CONFIG.WEAPON_FEEL.default;
+                weaponHitsThisFrame[b.weaponType] = (weaponHitsThisFrame[b.weaponType] || 0) + 1;
+                const hitStopFrames = isCrit ? feel.critHitStop : feel.hitStop;
+                if (hitStopFrames > 0) ctx.triggerHitStop(hitStopFrames);
+                let shakeAmt = isCrit ? feel.critShake : feel.shake;
+                if (feel.pelletShakeStep) {
+                  const extraHits = Math.min(weaponHitsThisFrame[b.weaponType] - 1, feel.pelletShakeCapHits || 4);
+                  shakeAmt += extraHits * feel.pelletShakeStep;
+                }
+                ctx.addShake(shakeAmt, feel.big);
+              }
+
               if (b.piercing) {
                 b.hitCount++;
                 if (b.hitCount >= b.maxPierce) hit = true;
@@ -3478,6 +3555,13 @@ class Game {
     this._shakeTime  = 0;
     this.thudShake   = 0;
     this._thudTime   = 0;
+    // FIX(polish52): smoothed camera-lead offset toward aim/movement.
+    this._camLeadX   = 0;
+    this._camLeadY   = 0;
+    // FIX(polish53): periodic re-check of ambient intensity during play, not
+    // just on wave transitions, so it also responds to corruption zones
+    // spawning/expiring mid-wave.
+    this._ambientUpdateTimer = 0;
     this._lowPowerMode = (navigator.hardwareConcurrency || 8) <= 4;
     this._frameTimeWindow    = [];
     this._frameTimeWindowMax = 60;
@@ -3561,6 +3645,7 @@ class Game {
       checkWallCollision: (x, y, size) => this.checkWallCollision(x, y, size),
       spawnParticles: (x, y, color, count) => this.spawnParticles(x, y, color, count),
       addShake: (amount, big) => this._addShake(amount, big),
+      triggerHitStop: (frames) => this.triggerHitStop(frames),
       triggerDamageFlash: (intensity) => this.triggerDamageFlash(intensity),
       vibrate: (ms) => this._vibrate(ms),
       handleEnemyDeath: (enemy, index) => this._handleEnemyDeath(enemy, index),
@@ -3691,6 +3776,8 @@ class Game {
     this._shakeTime   = 0;
     this.thudShake    = 0;
     this._thudTime    = 0;
+    this._camLeadX    = 0;
+    this._camLeadY    = 0;
     this._accumulator = 0;
     this.trailMgr.clear();
 
@@ -3844,6 +3931,7 @@ class Game {
 
     this.cameraShake = 0; this.damageFlash = 0; this._shakeTime = 0;
     this.thudShake    = 0; this._thudTime  = 0;
+    this._camLeadX    = 0; this._camLeadY  = 0;
     this._accumulator = 0;
     this.trailMgr.clear();
     this._deadBullets = 0; this._deadParticles = 0;
@@ -3918,9 +4006,7 @@ class Game {
         this.waveSystem.advanceWave(this._waveContext());
         this.fsm.transition(GameState.PLAYING);
         this.lastTime = performance.now();
-        const waveLevel    = Utils.clamp(this.wave / 15, 0, 1);
-        const densityLevel = Utils.clamp(this.enemies.length / 25, 0, 1);
-        this.audio.setAmbientIntensity(waveLevel * 0.7 + densityLevel * 0.3);
+        this._updateAmbientIntensity();
       }
     }
 
@@ -3981,7 +4067,14 @@ class Game {
 
     this._updateCorruptionZones(dt);
 
+    this._ambientUpdateTimer -= dt;
+    if (this._ambientUpdateTimer <= 0) {
+      this._ambientUpdateTimer = 1.2;
+      this._updateAmbientIntensity();
+    }
+
     this.player.update(dt, this.input);
+    this._updateCameraLead(dt);
     if (this.dailyMode) this._updateGhostPlayback(dt);
 
     for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -4106,8 +4199,11 @@ class Game {
 
     ctx.save();
 
-    if (this.cameraShake > 0.05 || this.thudShake > 0.05) {
-      let ox = 0, oy = 0;
+    {
+      // FIX(polish52): camera lead is folded into the same single translate
+      // as shake rather than a second ctx.translate call, so world-space
+      // drawing below is unaffected either way.
+      let ox = this._camLeadX, oy = this._camLeadY;
       if (this.cameraShake > 0.05) {
         ox += Math.sin(this._shakeTime * CONFIG.SHAKE_FREQ * Math.PI * 2)       * this.cameraShake;
         oy += Math.sin(this._shakeTime * CONFIG.SHAKE_FREQ * Math.PI * 2 + 1.5) * this.cameraShake;
@@ -4116,7 +4212,7 @@ class Game {
         ox += Math.sin(this._thudTime * CONFIG.SHAKE_THUD_FREQ * Math.PI * 2)       * this.thudShake;
         oy += Math.sin(this._thudTime * CONFIG.SHAKE_THUD_FREQ * Math.PI * 2 + 2.1) * this.thudShake;
       }
-      ctx.translate(ox, oy);
+      if (ox !== 0 || oy !== 0) ctx.translate(ox, oy);
     }
 
     // ── Walls (body → HP bg → HP fg, single pass per wall) ─────────────────
@@ -4201,7 +4297,15 @@ class Game {
     }
 
     // ── Particles ──────────────────────────────────────────────────────
-    for (const p of this.particles) p.draw(ctx, alpha);
+    // FIX(polish55): fade/cull generic particles once enemy count climbs so
+    // boss telegraphs and player-damage numbers (drawn through their own
+    // untouched paths) stay legible instead of drowning in hit-spark noise.
+    const densityT = Utils.clamp(
+      (this.enemies.length - CONFIG.PARTICLE_DENSITY_CULL_START) /
+      (CONFIG.PARTICLE_DENSITY_CULL_MAX - CONFIG.PARTICLE_DENSITY_CULL_START), 0, 1
+    );
+    const particleDensityMult = 1 - densityT * (1 - CONFIG.PARTICLE_DENSITY_MIN_ALPHA);
+    for (const p of this.particles) p.draw(ctx, alpha, particleDensityMult);
     ctx.globalAlpha = 1;
 
     // ── Bullet trails ─────────────────────────────────────────────────────
@@ -4901,12 +5005,59 @@ class Game {
     const rm     = this._reducedMotion ? 0.35 : 1;
     const scaled = Math.max(1, Math.round(frames * rm));
     this._hitStopFrames = Math.max(this._hitStopFrames || 0, scaled);
+    // FIX(polish54): duck the ambient bed so the impact that just earned a
+    // hit-stop frame is actually audible against it.
+    this.audio.duckAmbient(0.5, 0.08);
   }
 
   triggerDamageFlash(intensity = 1.0, big = false) {
     const rm = this._reducedMotion ? 0.35 : 1;
     this.damageFlash  = Math.min(1, this.damageFlash + 0.35 * intensity * rm);
     this._addShake(CONFIG.SHAKE_MAX * 0.6 * intensity, big);
+    // FIX(polish54): a bigger, longer duck than the hit-stop one — taking
+    // damage should read as the clearest audio moment in the mix.
+    this.audio.duckAmbient(0.65, 0.15);
+  }
+
+  // FIX(polish52): small, capped camera lead in the direction of aim and
+  // movement so fast play reads as more kinetic. Blended (not renormalized)
+  // so the two weights already sum to the max offset when aligned, and
+  // partially cancel when the player aims one way while strafing another —
+  // that cancellation is intentional, it keeps the lead from ever feeling
+  // erratic. Smoothed toward the target rather than snapping to it, and
+  // scaled down under reduced-motion exactly like shake/hitstop already are.
+  // FIX(polish53): danger-driven ambient intensity — reuses the wave counter,
+  // live enemy count, and corruptionZones array that already exist on Game
+  // rather than tracking anything new. Corruption zones weight heaviest
+  // since they're the most acute on-screen threat; wave and density set the
+  // slow-building floor underneath them.
+  _updateAmbientIntensity() {
+    const waveLevel      = Utils.clamp(this.wave / 15, 0, 1);
+    const densityLevel   = Utils.clamp(this.enemies.length / 25, 0, 1);
+    const corruptionLevel = Utils.clamp(this.corruptionZones.length / 3, 0, 1);
+    this.audio.setAmbientIntensity(waveLevel * 0.5 + densityLevel * 0.2 + corruptionLevel * 0.3);
+  }
+
+  _updateCameraLead(dt) {
+    const p = this.player;
+    if (!p || !p.alive) return;
+
+    const aim      = p._cachedAimAngle;
+    const moveDx   = p.x - p.prevX;
+    const moveDy   = p.y - p.prevY;
+    const moveLen  = Math.hypot(moveDx, moveDy);
+    const moveDirX = moveLen > 0.001 ? moveDx / moveLen : 0;
+    const moveDirY = moveLen > 0.001 ? moveDy / moveLen : 0;
+
+    const rm = this._reducedMotion ? 0.3 : 1;
+    const targetX = (Math.cos(aim) * CONFIG.CAMERA_LEAD_AIM_WEIGHT + moveDirX * CONFIG.CAMERA_LEAD_MOVE_WEIGHT)
+      * CONFIG.CAMERA_LEAD_MAX * rm;
+    const targetY = (Math.sin(aim) * CONFIG.CAMERA_LEAD_AIM_WEIGHT + moveDirY * CONFIG.CAMERA_LEAD_MOVE_WEIGHT)
+      * CONFIG.CAMERA_LEAD_MAX * rm;
+
+    const smooth = Math.min(1, dt * CONFIG.CAMERA_LEAD_SMOOTH);
+    this._camLeadX += (targetX - this._camLeadX) * smooth;
+    this._camLeadY += (targetY - this._camLeadY) * smooth;
   }
 
   _addShake(amount, big = false) {
