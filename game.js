@@ -37,29 +37,17 @@ const CONFIG = Object.freeze({
   SHAKE_FREQ:           55,
   SHAKE_THUD_FREQ:      10,
 
-  // FIX(polish51): per-weapon hit-stop/shake tuning — GUN stays snappy and
-  // barely interrupts the frame, SHOTGUN leans on a heavier hit-stop plus a
-  // widening punch when multiple pellets connect in the same frame, LASER
-  // is deliberately kept low on both so continuous beam contact reads as
-  // sustained pressure rather than a string of discrete impacts.
   WEAPON_FEEL: {
     default: { hitStop: 0, critHitStop: 1, shake: 1.4, critShake: 3.2, big: false },
     spread:  { hitStop: 2, critHitStop: 3, shake: 3.5, critShake: 6.5, big: true, pelletShakeStep: 1.15, pelletShakeCapHits: 4 },
     laser:   { hitStop: 0, critHitStop: 0, shake: 0.7, critShake: 1.3, big: false },
   },
 
-  // FIX(polish52): subtle camera lead toward aim/movement direction — capped
-  // magnitude and smoothed so fast play reads as more kinetic without ever
-  // feeling disorienting. Blend favors aim slightly over raw movement.
   CAMERA_LEAD_MAX:         22,
   CAMERA_LEAD_AIM_WEIGHT:  0.6,
   CAMERA_LEAD_MOVE_WEIGHT: 0.4,
   CAMERA_LEAD_SMOOTH:      7,
 
-  // FIX(polish55): once enemy counts get large, generic hit/death particles
-  // start burying real threats (bosses, projectiles) in visual noise. Fade
-  // and cull them past this density band; damage numbers and boss telegraphs
-  // are never touched by this.
   PARTICLE_DENSITY_CULL_START: 35,
   PARTICLE_DENSITY_CULL_MAX:   70,
   PARTICLE_DENSITY_MIN_ALPHA:  0.32,
@@ -100,6 +88,21 @@ const CONFIG = Object.freeze({
   WALL_COLOR:           "#1a2033",
   WALL_HP_COLOR:        "#e74c3c",
   WALL_HP_GOOD_COLOR:   "#2ecc71",
+
+  COLORBLIND_OVERRIDES: {
+    HUD_COLOR_HP_FG:    "#0072B2", // was #2ecc71 green -> safe blue, vs red bg
+    WALL_HP_GOOD_COLOR: "#0072B2", // was #2ecc71 green -> safe blue, vs red bar
+  },
+
+  COLORBLIND_ENEMY_COLORS: {
+    normal:   "#009E73",
+    rusher:   "#D55E00",
+    fast:     "#F0E442",
+    ranged:   "#56B4E9",
+    spread:   "#CC79A7",
+    exploder: "#E69F00",
+    tank:     "#0072B2",
+  },
 });
 
 
@@ -184,11 +187,6 @@ const WEAPON_TUNING = Object.freeze({
 // ── ASCENSION_LEVELS ────────────────────────────────────────────
 const ASCENSION_LEVELS = Object.freeze([10, 20, 30]);
 
-// FIX(bigswing4.3): branching ascension path. Tier1 (level 10) locks in a
-// base mod; tier2 (level 20) offers two specializations of THAT base mod
-// only (not the other two paths); tier3 (level 30) is a single capstone
-// whose effect depends on which tier2 specialization was taken. Two players
-// who diverge at tier1/tier2 end up with visibly different wave-30 builds.
 const ASCENSION_TREE = {
   ricochet: {
     id: "ricochet", weapon: "default", masteryId: "ricochetMastery",
@@ -231,10 +229,6 @@ for (const base of Object.values(ASCENSION_TREE)) {
   ASCENSION_ID_SET.add(base.masteryId);
 }
 
-// FIX(levelup2b): build-defining level-up choices. Unlike the 7 numeric
-// upgrades, each of these changes bullet behavior or creates a real
-// stat tradeoff, and can only be picked once per run. minLevel keeps them
-// from crowding out the numeric options too early in a run.
 const BUILD_MODS = Object.freeze([
   {
     id: "corrosiveRounds", minLevel: 3,
@@ -470,12 +464,6 @@ class GameFSM {
 // =============================================================================
 // SECTION 4B — EVENT BUS
 // =============================================================================
-// FIX(decouple2a): a minimal pub/sub so the game loop and the UI layer can
-// talk to each other without reaching directly into one another's internals.
-// Deliberately tiny — this is not a framework-style rewrite, just enough to
-// remove the direct cross-cutting calls (Player -> UIManager.showX(),
-// UIManager -> Player.upgrades/mods/health) that made the Part 1 bug class
-// easy to reintroduce.
 class EventBus {
   constructor() { this._listeners = new Map(); }
 
@@ -648,10 +636,6 @@ class TrailManager {
     if (t.count < this._maxLen) t.count++;
   }
 
-  // FIX(visual3c): every registered trail (and there can be many at once
-  // during a boss fight or a high wave with laser/ricochet/split bullets)
-  // unconditionally paid for a soft canvas shadow. Reuses the existing
-  // _lowPowerMode signal instead of adding a separate degradation path.
   draw(ctx, lowPower = false) {
     for (const [, t] of this._trails) {
       if (t.count < 2) continue;
@@ -702,10 +686,6 @@ class AudioEngine {
     return this._ctx;
   }
 
-  // FIX(audio3c): every shot/hit/kill played the exact same fixed frequency
-  // sweep every single time — over a long run that reads as monotonous.
-  // Small random pitch jitter keeps each hit distinct without changing the
-  // character of the sound (still procedural, no new audio assets).
   _jitter(freq, amount = 0.06) {
     return freq * (1 + (Math.random() * 2 - 1) * amount);
   }
@@ -775,11 +755,6 @@ class AudioEngine {
     } catch (e) {  }
   }
 
-  // FIX(polish54): brief GainNode ramp-down/back-up on the ambient bed so a
-  // hit-stop frame or a player-damage flash reads clearly against it,
-  // instead of the ambient layer washing the impact out. No new nodes are
-  // created here — it rides the same master gain startAmbient() already set
-  // up, so muted/ambient-off states are naturally respected.
   duckAmbient(depth = 0.55, holdSeconds = 0.09) {
     if (!this._ambientNodes || this.muted) return;
     try {
@@ -925,11 +900,6 @@ class AudioEngine {
     }, 0.15);
   }
 
-  // FIX(audio3c): level-up had no sound at all — a flat, anticlimactic
-  // moment for what should be a high point of the run. Bright ascending
-  // triad, fully procedural (WebAudio oscillators only, no assets), with a
-  // wider pitch jitter on the ascension variant so it reads as more
-  // significant than a regular level-up.
   playLevelUp(big = false) {
     if (this.muted) return;
     try {
@@ -949,6 +919,74 @@ class AudioEngine {
         g.connect(ctx.destination);
         osc.start(t);
         osc.stop(t + 0.4);
+        osc.onended = () => g.disconnect();
+      });
+    } catch (e) {  }
+  }
+
+  playBossTelegraph() {
+    if (this.muted) return;
+    try {
+      const ctx = this._getCtx();
+      [660, 440].forEach((freq, i) => {
+        const t   = ctx.currentTime + i * 0.16;
+        const osc = ctx.createOscillator();
+        osc.type  = "square";
+        osc.frequency.setValueAtTime(this._jitter(freq, 0.02), t);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.24, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+        osc.connect(g);
+        g.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.24);
+        osc.onended = () => g.disconnect();
+      });
+    } catch (e) {  }
+  }
+
+  playCorruptionMature() {
+    if (this.muted) return;
+    try {
+      const ctx = this._getCtx();
+      const osc = ctx.createOscillator();
+      osc.type  = "sawtooth";
+      osc.frequency.setValueAtTime(this._jitter(70, 0.05), ctx.currentTime);
+      osc.frequency.linearRampToValueAtTime(this._jitter(95, 0.05), ctx.currentTime + 0.5);
+      const filt = ctx.createBiquadFilter();
+      filt.type = "lowpass";
+      filt.frequency.setValueAtTime(300, ctx.currentTime);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, ctx.currentTime);
+      g.gain.linearRampToValueAtTime(0.22, ctx.currentTime + 0.15);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+      osc.connect(filt);
+      filt.connect(g);
+      g.connect(ctx.destination);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.62);
+      osc.onended = () => g.disconnect();
+    } catch (e) {  }
+  }
+
+  playLowHealth() {
+    if (this.muted) return;
+    try {
+      const ctx = this._getCtx();
+      [0, 0.18].forEach(offset => {
+        const t   = ctx.currentTime + offset;
+        const osc = ctx.createOscillator();
+        osc.type  = "sine";
+        osc.frequency.setValueAtTime(this._jitter(300, 0.03), t);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.2, t + 0.015);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+        osc.connect(g);
+        g.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.17);
         osc.onended = () => g.disconnect();
       });
     } catch (e) {  }
@@ -1179,11 +1217,6 @@ class Particle {
     this.life -= dt;
   }
 
-  // FIX(polish55): densityMult (1 = normal) is computed once per frame from
-  // current enemy count, not per particle, and fades/culls generic particles
-  // at high enemy density so real threats stay readable. Never applied to
-  // damage numbers or boss telegraphs — those are drawn through a separate
-  // path untouched by this multiplier.
   draw(ctx, alpha, densityMult = 1) {
     if (!this.active || this.size < 0.3) return;
     if (densityMult < 1 && this.size < 1.2) return;
@@ -1230,8 +1263,6 @@ class Player {
     this._cachedAimAngle = 0;
   }
 
-  // FIX(levelup2b): Glass Cannon Core trades max health for damage — both
-  // sides live here so the tradeoff can never drift out of sync.
   get maxHealth()  {
     let h = CONFIG.PLAYER_BASE_HEALTH + this.upgrades.health * 20 + this.game.meta.getBonus("health");
     if (this.mods.glassCannonCore) h *= 0.75;
@@ -1274,16 +1305,7 @@ class Player {
       if (ax !== 0 || ay !== 0) return Math.atan2(ay, ax);
     }
 
-    // FIX(aim1): Manual aim — an active right-side touch-drag, or the mouse
-    // having actually moved — always wins over auto-aim, on ANY device.
-    // Auto-aim is a fallback for when the player isn't actively aiming, not
-    // something that should override live touch input just because the
-    // device happens to be classified as mobile.
     const hasManualAim = input.aimTouchActive || input._mouseMoved;
-
-    // FIX(aim2): the boss was never a valid fallback target because it isn't
-    // stored in game.enemies. Folded into this computation only, without
-    // touching how the boss is stored/spawned elsewhere.
     const boss = this.game.boss;
     const hasFallbackTarget = this.game.enemies.length > 0 || (boss && boss.alive);
 
@@ -1309,7 +1331,6 @@ class Player {
     this.prevY = this.y;
 
     this._cachedAimAngle = this._computeAimAngle(input);
-
     for (const key in this.buffs) {
       if (this.buffs[key] > 0) this.buffs[key] = Math.max(0, this.buffs[key] - dt);
     }
@@ -1329,8 +1350,6 @@ class Player {
     if (len > 0) { dx /= len; dy /= len; }
 
     const wantsShoot = input.isShooting || input._shootBuffer;
-    // FIX(bigswing4.2): record a compact ghost-replay sample (movement/aim/
-    // shoot only, not full game state) before movement/collision is applied.
     this.game._recordGhostTick(dx, dy, this._cachedAimAngle, wantsShoot);
 
     const nx = this.x + dx * this.speed * dt;
@@ -1421,11 +1440,6 @@ class Player {
     }
   }
 
-  // FIX(decouple2a): UIManager previously wrote directly into
-  // this.upgrades[type]/this.mods[id] and this.health. Owning these as
-  // methods means Player controls its own invariants (e.g. full-heal on a
-  // health pick) instead of the UI layer reaching into internals it doesn't
-  // own.
   applyUpgrade(type) {
     if (!type || !(type in this.upgrades)) return false;
     this.upgrades[type]++;
@@ -1438,10 +1452,6 @@ class Player {
     this.mods[id] = true;
     return true;
   }
-
-  // FIX(levelup2b): one-time build-defining picks. Glass Cannon Core lowers
-  // maxHealth immediately, so current health is clamped down with it rather
-  // than leaving the player visually "overhealed" above their new cap.
   applyBuildMod(id) {
     if (!id || !BUILD_MODS.some(m => m.id === id) || this.mods[id]) return false;
     this.mods[id] = true;
@@ -1456,9 +1466,6 @@ class Player {
       this.stats.xp      -= this.stats.xpToNext;
       this.stats.xpToNext = Math.floor(this.stats.xpToNext * 1.2);
       this.game._vibrate(25);
-      // FIX(decouple2a): emit rather than reach into this.game.ui directly —
-      // UIManager decides what "level up" looks like on screen; Player only
-      // reports that it happened.
       const ascension = ASCENSION_LEVELS.includes(this.stats.level) && !this._ascensionLevelsSeen.has(this.stats.level);
       if (ascension) this._ascensionLevelsSeen.add(this.stats.level);
       this.game.events.emit("player:levelup", { level: this.stats.level, ascension });
@@ -1555,7 +1562,7 @@ class Enemy {
     this._lastMeleeHit = -Infinity;
 
     const def = ENEMY_TYPES[type] || ENEMY_TYPES.normal;
-    this.color      = def.color;
+    this.color      = game.getEnemyColor(type);
     this.size       = def.baseSize * game.uiScale;
     this.speed      = def.speed;
     this.hp         = baseHp * def.hpMul;
@@ -1890,9 +1897,6 @@ class Boss {
       case "telegraph": {
         this._phaseTimer += dt;
         this._flashTimer  += dt;
-        // FIX(a11y3b): this ~8Hz strobe was the one flashing effect that
-        // never checked _reducedMotion. Slow it to a gentler pulse instead
-        // of a rapid flicker when the player has that preference set.
         const flashInterval = this.game._reducedMotion ? 0.32 : 0.12;
         if (this._flashTimer >= flashInterval) {
           this._flashToggle = !this._flashToggle;
@@ -1980,8 +1984,6 @@ class Boss {
     ctx.closePath();
     ctx.fillStyle   = "rgba(5,8,16,0.82)";
     ctx.fill();
-    // FIX(a11y3b): shape-only ID previously only applied to regular enemies —
-    // the boss never got the thicker, high-contrast outline pass.
     const shapeOnlyID = this.game.accessibility.shapeOnlyID;
     ctx.strokeStyle = drawColor;
     ctx.lineWidth   = shapeOnlyID ? 5 : 3.5;
@@ -2047,9 +2049,6 @@ class InputManager {
 
     this._mouseMoved = false;
 
-    // FIX(aim1): tracks whether a right-side touch-drag aim is currently
-    // held down, independent of firing state, so Player can tell "the player
-    // is manually aiming right now" apart from "the device supports touch".
     this.aimTouchActive = false;
 
     this._bindListeners();
@@ -2247,10 +2246,6 @@ class InputManager {
 
   _updateJoystick(touch, baseX, baseY, knob) {
     const maxRadius = 40;
-    // FIX(mobile3a): ignore the innermost 12% of travel so tiny thumb jitter
-    // near center doesn't register as movement, then re-normalize so output
-    // still ramps smoothly from 0 to full speed across the remaining travel
-    // instead of jumping straight to a non-zero value at the dead-zone edge.
     const deadZone = 0.12;
     let dx = touch.clientX - baseX;
     let dy = touch.clientY - baseY;
@@ -2295,15 +2290,9 @@ class UIManager {
       quitBtn:         document.getElementById("quitBtn"),
     };
 
-    // FIX(ui2): where #coinShop naturally lives depends on viewport size —
-    // see _layoutCoinShop(). Remember its original fixed-overlay parent so
-    // we can always move it back on larger viewports.
     this._coinShopHomeParent = this._el.coinShop?.parentElement || null;
 
     this._pendingAscension = null;
-
-    // FIX(decouple2a): the only place that decides "level up" -> which panel
-    // to show. Player just reports the event; it doesn't know UIManager exists.
     this.game.events.on("player:levelup", ({ ascension }) => {
       this.game.audio.playLevelUp(ascension);
       if (ascension) this.showAscensionChoice();
@@ -2323,11 +2312,6 @@ class UIManager {
     if (dailyDateLabel) dailyDateLabel.textContent = `(${Utils.todayUTCString()})`;
   }
 
-  // ── FIX(ui2): single owner of "what's visible in FSM state X" ─────────────
-  // This is the ONLY place screen/panel/floating-button visibility is
-  // decided. Every state transition routes through here instead of
-  // scattering classList.add/remove("hidden") calls across click handlers
-  // and FSM enter/exit hooks.
   showScreen(state, opts = {}) {
     const el     = this._el;
     const mobile = this._shouldShowMobileUI();
@@ -2393,6 +2377,10 @@ class UIManager {
     el.ascension?.classList.toggle("hidden", !v.ascension);
     el.quitBtn?.classList.toggle("hidden", !v.quitBtn);
 
+    if (v.levelUp)   this._focusFirstIn(el.levelUp);
+    if (v.ascension) this._focusFirstIn(el.ascension);
+    if (v.gameOverActions) this._focusFirstIn(el.gameOverActions);
+
     el.weaponBtnPC?.classList.toggle("hidden", !v.weaponBtnPCShown);
     el.weaponBtnPC?.classList.toggle("is-disabled", v.weaponBtnPCShown && !v.weaponBtnPCEnabled);
 
@@ -2404,19 +2392,6 @@ class UIManager {
 
     this._currentScreenState = state;
   }
-
-  // FIX(ui2): #coinShop is position:fixed/bottom-right and was laid out
-  // fully independently of #startScreen's centered .screen__inner, so on
-  // small/landscape viewports it could cover the leaderboard, daily strip,
-  // or DEPLOY button. On those viewports we dock it into the menu's actual
-  // layout flow (appended inside .screen__inner) instead of letting it
-  // float; on larger viewports it returns to its normal floating position.
-  // FIX(a11y3b): the Text Size setting previously only reached the
-  // canvas-drawn top HUD (via g.uiScale * g.accessibility.textScale in
-  // drawHUD). All DOM text — menus, level-up/ascension choices, shop,
-  // how-to-play, the accessibility panel itself — only ever scaled with
-  // --ui-scale (viewport-based), never with the player's chosen text size.
-  // This CSS variable is consumed by every font-size rule in style.css.
   _applyTextScale() {
     document.documentElement.style.setProperty("--text-scale", this.game.accessibility.textScale);
   }
@@ -2458,10 +2433,12 @@ class UIManager {
       instrDesktop?.classList.toggle("hidden", mobile);
       instrMobile?.classList.toggle("hidden", !mobile);
       instrPanel.classList.remove("hidden");
+      this._focusFirstIn(instrPanel);
     };
 
     const closeInstructions = () => {
       instrPanel?.classList.add("hidden");
+      howToBtn?.focus();
     };
 
     if (howToBtn) howToBtn.addEventListener("click", openInstructions);
@@ -2474,11 +2451,14 @@ class UIManager {
     }
 
     window.addEventListener("keydown", e => {
-      if (e.key === "Escape" && instrPanel && !instrPanel.classList.contains("hidden")) {
-        closeInstructions();
-      }
+      if (!instrPanel || instrPanel.classList.contains("hidden")) return;
+      if (e.key === "Escape") closeInstructions();
+      else this._trapFocus(e, instrPanel);
     });
 
+    // ═══════════════════════════════════════════════════════════════════
+    // ACCESSIBILITY — QA CHECKLIST 
+    // ═══════════════════════════════════════════════════════════════════
     const a11yBtn      = document.getElementById("accessibilityBtn");
     const a11yPanel    = document.getElementById("accessibilityScreen");
     const a11yClose    = document.getElementById("accessibilityCloseBtn");
@@ -2486,6 +2466,7 @@ class UIManager {
     const shakeValue   = document.getElementById("shakeIntensityValue");
     const textOptions  = document.querySelectorAll("#textSizeOptions .a11y-option");
     const shapeToggle  = document.getElementById("shapeOnlyToggle");
+    const colorblindToggle = document.getElementById("colorblindToggle");
 
     const refreshA11yControls = () => {
       const a = this.game.accessibility;
@@ -2495,10 +2476,18 @@ class UIManager {
         btn.classList.toggle("active", parseFloat(btn.dataset.scale) === a.textScale);
       });
       if (shapeToggle) shapeToggle.checked = a.shapeOnlyID;
+      if (colorblindToggle) colorblindToggle.checked = a.colorblindMode;
     };
 
-    const openA11y = () => { refreshA11yControls(); a11yPanel?.classList.remove("hidden"); };
-    const closeA11y = () => { a11yPanel?.classList.add("hidden"); };
+    const openA11y = () => {
+      refreshA11yControls();
+      a11yPanel?.classList.remove("hidden");
+      this._focusFirstIn(a11yPanel);
+    };
+    const closeA11y = () => {
+      a11yPanel?.classList.add("hidden");
+      a11yBtn?.focus();
+    };
 
     if (a11yBtn)   a11yBtn.addEventListener("click", openA11y);
     if (a11yClose) a11yClose.addEventListener("click", closeA11y);
@@ -2506,7 +2495,9 @@ class UIManager {
       a11yPanel.addEventListener("click", e => { if (e.target === a11yPanel) closeA11y(); });
     }
     window.addEventListener("keydown", e => {
-      if (e.key === "Escape" && a11yPanel && !a11yPanel.classList.contains("hidden")) closeA11y();
+      if (!a11yPanel || a11yPanel.classList.contains("hidden")) return;
+      if (e.key === "Escape") closeA11y();
+      else this._trapFocus(e, a11yPanel);
     });
 
     if (shakeSlider) {
@@ -2532,6 +2523,25 @@ class UIManager {
         this.game._saveAccessibility();
       });
     }
+
+    if (colorblindToggle) {
+      colorblindToggle.addEventListener("change", () => {
+        this.game.accessibility.colorblindMode = colorblindToggle.checked;
+        this.game._saveAccessibility();
+      });
+    }
+
+    window.addEventListener("keydown", e => {
+      if (e.key !== "Tab") return;
+      const el = this._el;
+      let container = null;
+      if (this._currentScreenState === GameState.LEVEL_UP) {
+        container = (el.ascension && !el.ascension.classList.contains("hidden")) ? el.ascension : el.levelUp;
+      } else if (this._currentScreenState === GameState.GAME_OVER) {
+        container = el.gameOverActions;
+      }
+      if (container && !container.classList.contains("hidden")) this._trapFocus(e, container);
+    });
 
     const startBtn = document.getElementById("startBtn");
     if (startBtn) {
@@ -2616,10 +2626,30 @@ class UIManager {
     return isLandscapeTouch;
   }
 
-  // FIX(decouple2a): small accessor pair so Game (start/saveRun) doesn't
-  // reach into this._pendingAscension directly.
   hasPendingAscension() { return !!this._pendingAscension; }
   clearPendingAscension() { this._pendingAscension = null; }
+  _trapFocus(e, container) {
+    if (e.key !== "Tab" || !container) return;
+    const focusables = Array.from(container.querySelectorAll(
+      "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"
+    )).filter(el => el.offsetParent !== null && !el.disabled);
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last  = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault(); last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault(); first.focus();
+    }
+  }
+
+  _focusFirstIn(container) {
+    if (!container) return;
+    requestAnimationFrame(() => {
+      const target = container.querySelector("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])");
+      if (target) target.focus();
+    });
+  }
 
   showLevelUp() {
     this._populateLevelUpGrid();
@@ -2627,11 +2657,6 @@ class UIManager {
     this.showScreen(GameState.LEVEL_UP, { panel: "levelup" });
   }
 
-  // FIX(levelup2b): the 7 static buttons in index.html are pure stat scaling,
-  // so runs converge on similar builds. When a build-defining BUILD_MODS pick
-  // is available (level gate met, not already taken), there's a chance to
-  // inject ONE extra choice into the same grid — reusing the existing
-  // upgrade-grid layout/CSS rather than a new panel or allocation-heavy system.
   _populateLevelUpGrid() {
     const grid = this._el.levelUp?.querySelector(".upgrade-grid");
     if (!grid) return;
@@ -2694,10 +2719,6 @@ class UIManager {
     this.showScreen(GameState.LEVEL_UP, { panel: "ascension" });
   }
 
-  // FIX(bigswing4.3): tier is derived from which ASCENSION_LEVELS milestone
-  // the player just hit. Tier1 offers two random base paths; tier2 offers
-  // only the two specializations of whichever base path was already chosen;
-  // tier3 offers the single capstone for that path.
   _buildAscensionOptions() {
     const player = this.game.player;
     const tier   = ASCENSION_LEVELS.indexOf(player.stats.level);
@@ -2979,8 +3000,6 @@ class UIManager {
     ctx.fillStyle = "rgba(232,240,254,0.7)";
     ctx.fillText(`Time: ${g.gameTime.toFixed(1)}s   Level ${p.stats.level}`, m, m + lh);
 
-    // FIX(bigswing4.2): show what the local ghost is racing toward. Pushes
-    // the health bar down one line so it never overlaps.
     const showGhostLine = g.dailyMode && !!g.ghostPlayback;
     if (showGhostLine) {
       ctx.fillStyle = "#5ad1ff";
@@ -2993,7 +3012,7 @@ class UIManager {
     const hpR = Utils.clamp(p.health / p.maxHealth, 0, 1);
     ctx.fillStyle = CONFIG.HUD_COLOR_HP_BG;
     this._roundRect(ctx, m, hbY, hbW, hbH, 4);
-    ctx.fillStyle = CONFIG.HUD_COLOR_HP_FG;
+    ctx.fillStyle = g.getColor("HUD_COLOR_HP_FG");
     if (hpR > 0) this._roundRect(ctx, m, hbY, hbW * hpR, hbH, 4);
     ctx.font      = `700 ${Math.max(11, 13 * s)}px ${CONFIG.HUD_FONT}`;
     ctx.fillStyle = CONFIG.HUD_COLOR_MAIN;
@@ -3183,10 +3202,6 @@ class WaveSystem {
   static BOSS_WAVE_INTERVAL = 5;
   static ENV_DESTRUCTION_START_WAVE = 10;
   static ENV_DESTRUCTION_INTERVAL   = 3;
-  // FIX(bigswing4.1): corruption used to only ever appear from a boss kill
-  // (a "wave-10 add-on"). It now also spreads periodically on its own once
-  // waves get dangerous, offset from the env-destruction cadence so the two
-  // don't always land on the same wave.
   static CORRUPTION_PERIODIC_START_WAVE = 12;
   static CORRUPTION_PERIODIC_INTERVAL   = 4;
 
@@ -3242,6 +3257,7 @@ class WaveSystem {
       ctx.kills = 0;
       ctx.waveTransitionTimer = 3.0;
       ctx.bossWarning = this.isBossWave(ctx.wave + 1);
+      if (ctx.bossWarning) ctx.playBossTelegraph();
       ctx.fsm.transition(GameState.WAVE_TRANSITION);
     }
   }
@@ -3272,10 +3288,6 @@ class CombatSystem {
   resolveBulletCollisions(ctx) {
     const enemyIndexMap = new Map();
     for (let i = 0; i < ctx.enemies.length; i++) enemyIndexMap.set(ctx.enemies[i], i);
-
-    // FIX(polish51): fresh every frame, never allocated inside the per-
-    // bullet loop below — only used to widen SHOTGUN's punch when several
-    // pellets connect in the same fixed-step frame.
     const weaponHitsThisFrame = { default: 0, spread: 0, laser: 0 };
 
     for (let i = 0; i < ctx.bullets.length; i++) {
@@ -3298,11 +3310,6 @@ class CombatSystem {
           }
         }
         ctx.spawnParticles(b.x, b.y, b.color, 5);
-        // FIX(bigswing4.3): ricochet bounce cap now depends on the branching
-        // path — base mod = 1 bounce, Chain Ricochet = 2, and Volatile
-        // Ricochet grants a bonus bounce specifically while inside a
-        // corruption zone (a distinct, situational interaction rather than
-        // a flat number bump).
         const mods = ctx.player.mods || {};
         let maxBounces = mods.ricochet ? 1 : 0;
         if (mods.ricochetChain) maxBounces = 2;
@@ -3355,11 +3362,6 @@ class CombatSystem {
               e.hp -= dmgDealt;
               ctx.damageNumbers.push(DamageNumber.get(b.x, b.y, Math.ceil(dmgDealt), isCrit, false));
 
-              // FIX(polish51): per-weapon hit feel — GUN only interrupts the
-              // frame on a crit, SHOTGUN gets a heavier hit-stop plus a
-              // widening shake as more pellets connect this frame, LASER
-              // stays low on both so continuous beam contact reads as
-              // sustained pressure rather than discrete impacts.
               if (!b.isEnemy) {
                 const feel = CONFIG.WEAPON_FEEL[b.weaponType] || CONFIG.WEAPON_FEEL.default;
                 weaponHitsThisFrame[b.weaponType] = (weaponHitsThisFrame[b.weaponType] || 0) + 1;
@@ -3381,9 +3383,6 @@ class CombatSystem {
                   b._forked = true;
                   const baseAngle = Math.atan2(b.dy, b.dx);
                   const speed     = Math.hypot(b.dx, b.dy);
-                  // FIX(bigswing4.3): Triple Split forks into 3 beams
-                  // instead of 2; Beam Mastery (when paired with Triple
-                  // Split) boosts each fork's damage.
                   const offsets = mods.beamTriple ? [-0.3, 0, 0.3] : [-0.25, 0.25];
                   const forkDmgMult = (mods.beamMastery && mods.beamTriple) ? 1.2 : 1;
                   for (const off of offsets) {
@@ -3396,9 +3395,6 @@ class CombatSystem {
                     ctx.trailMgr.register(fb, fb.color);
                   }
                 }
-                // FIX(bigswing4.1): Amplified Beam — grants one extra pierce
-                // the moment a beam is inside a corruption zone, applied
-                // once per bullet so it can't compound every frame.
                 if (mods.beamCorrupt && !b._corruptPierceGranted && ctx.isInCorruption(e.x, e.y)) {
                   b._corruptPierceGranted = true;
                   b.maxPierce += 1;
@@ -3406,9 +3402,6 @@ class CombatSystem {
                 }
               } else if (!isCrit && !b.isEnemy && !b._kineticBounced &&
                          ctx.player.mods?.kineticOverload && Math.random() < 0.25) {
-                // FIX(levelup2b): Kinetic Overload — redirect the bullet at
-                // the next nearest enemy instead of terminating it, reusing
-                // the spatial hash rather than a new targeting system.
                 b._kineticBounced = true;
                 const next = ctx.spatialHash.query(e.x, e.y, 240)
                   .find(o => o !== e && o.alive);
@@ -3436,11 +3429,6 @@ class CombatSystem {
               if (e.hp <= 0 && ei !== undefined) {
                 const mods = ctx.player.mods || {};
                 if (!b.isEnemy && b.weaponType === "spread" && mods.detonatorPellets) {
-                  // FIX(bigswing4.3): Wide Blast/Corrosive Blast are real,
-                  // situational branches rather than another flat number —
-                  // Corrosive Blast's bonus only applies inside a corruption
-                  // zone, Mastery's knockback/seed depends on which tier2
-                  // path was actually taken.
                   let splashR = 70;
                   if (mods.detonatorWide) splashR *= 1.6;
                   const splashRSq  = splashR * splashR;
@@ -3524,12 +3512,13 @@ class Game {
     this.canvas = document.getElementById("gameCanvas");
     this.ctx    = this.canvas.getContext("2d");
 
-    this.accessibility = { shakeIntensity: 1, textScale: 1, shapeOnlyID: false };
+    this.accessibility = { shakeIntensity: 1, textScale: 1, shapeOnlyID: false, colorblindMode: false };
     try {
       const saved = JSON.parse(localStorage.getItem("ks_accessibility") || "{}");
       if (typeof saved.shakeIntensity === "number") this.accessibility.shakeIntensity = Utils.clamp(saved.shakeIntensity, 0, 1);
       if (typeof saved.textScale === "number")      this.accessibility.textScale      = saved.textScale;
       if (typeof saved.shapeOnlyID === "boolean")   this.accessibility.shapeOnlyID    = saved.shapeOnlyID;
+      if (typeof saved.colorblindMode === "boolean") this.accessibility.colorblindMode = saved.colorblindMode;
     } catch {  }
 
     this.events = new EventBus();
@@ -3555,12 +3544,8 @@ class Game {
     this._shakeTime  = 0;
     this.thudShake   = 0;
     this._thudTime   = 0;
-    // FIX(polish52): smoothed camera-lead offset toward aim/movement.
     this._camLeadX   = 0;
     this._camLeadY   = 0;
-    // FIX(polish53): periodic re-check of ambient intensity during play, not
-    // just on wave transitions, so it also responds to corruption zones
-    // spawning/expiring mid-wave.
     this._ambientUpdateTimer = 0;
     this._lowPowerMode = (navigator.hardwareConcurrency || 8) <= 4;
     this._frameTimeWindow    = [];
@@ -3578,10 +3563,6 @@ class Game {
 
     this.dailyMode = false;
     this.rng       = Math.random;
-
-    // FIX(bigswing4.2): ghost replay state. ghostRecording captures the
-    // current run's compact input stream (daily mode only); ghostPlayback
-    // holds the best local ghost for today's date, replayed visually.
     this.ghostRecording = null;
     this.ghostPlayback  = null;
 
@@ -3669,6 +3650,7 @@ class Game {
       scheduleEnvDestruction: () => game.scheduleEnvironmentalDestruction(),
       schedulePeriodicCorruption: () => game._schedulePeriodicCorruption(),
       addShake: (amount) => game._addShake(amount),
+      playBossTelegraph: () => game.audio.playBossTelegraph(),
       get wave()               { return game.wave; },
       set wave(v)               { game.wave = v; },
       get kills()               { return game.kills; },
@@ -3709,14 +3691,9 @@ class Game {
         enter: () => { this.ui.showScreen(GameState.WAVE_TRANSITION); },
       })
       .register(GameState.LEVEL_UP, {
-        // Entered via UIManager.showLevelUp() / showAscensionChoice(), which
-        // call showScreen(LEVEL_UP, {panel}) directly since they're the only
-        // ones who know which of the two panels to show.
       });
 
-    // Establish correct initial DOM visibility for the FSM's starting state
-    // (MENU) without a no-op transition — GameFSM.transition() only fires
-    // hooks on an actual state change.
+
     this.ui.showScreen(GameState.MENU);
   }
 
@@ -3749,9 +3726,6 @@ class Game {
     this.rng = this.dailyMode
       ? Utils.createSeededRNG(`kritikshoot-daily-${this.dailySeedDate}`)
       : Math.random;
-
-    // FIX(bigswing4.2): fresh recorder for this run, and load today's best
-    // ghost (if any) to race against. Both are no-ops outside daily mode.
     this.ghostRecording = this.dailyMode ? { samples: [], tickCounter: 0 } : null;
     this._loadGhost();
 
@@ -3778,6 +3752,7 @@ class Game {
     this._thudTime    = 0;
     this._camLeadX    = 0;
     this._camLeadY    = 0;
+    this._lowHealthCueTimer = 0;
     this._accumulator = 0;
     this.trailMgr.clear();
 
@@ -3876,10 +3851,6 @@ class Game {
     this.rng = this.dailyMode
       ? Utils.createSeededRNG(`kritikshoot-daily-${this.dailySeedDate}`)
       : Math.random;
-
-    // FIX(bigswing4.2): the exact mid-run recording isn't persisted in the
-    // snapshot, so a resumed run starts a fresh (shorter) recording rather
-    // than losing ghost saving entirely. Best-ghost playback reloads as normal.
     this.ghostRecording = this.dailyMode ? { samples: [], tickCounter: 0 } : null;
     this._loadGhost();
 
@@ -3932,6 +3903,7 @@ class Game {
     this.cameraShake = 0; this.damageFlash = 0; this._shakeTime = 0;
     this.thudShake    = 0; this._thudTime  = 0;
     this._camLeadX    = 0; this._camLeadY  = 0;
+    this._lowHealthCueTimer = 0;
     this._accumulator = 0;
     this.trailMgr.clear();
     this._deadBullets = 0; this._deadParticles = 0;
@@ -4180,6 +4152,13 @@ class Game {
       this.thudShake  *= Math.exp(-CONFIG.SHAKE_DECAY * dt);
       if (this.thudShake < 0.05) { this.thudShake = 0; this._thudTime = 0; }
     }
+    if (this.player && this.player.alive) {
+      this._lowHealthCueTimer = Math.max(0, (this._lowHealthCueTimer || 0) - dt);
+      if (this.player.health / this.player.maxHealth <= 0.25 && this._lowHealthCueTimer <= 0) {
+        this._lowHealthCueTimer = 2.2;
+        this.audio.playLowHealth();
+      }
+    }
 
     if (this.player && !this.player.alive && this.fsm.isNot(GameState.GAME_OVER)) {
       this.fsm.transition(GameState.GAME_OVER);
@@ -4200,9 +4179,6 @@ class Game {
     ctx.save();
 
     {
-      // FIX(polish52): camera lead is folded into the same single translate
-      // as shake rather than a second ctx.translate call, so world-space
-      // drawing below is unaffected either way.
       let ox = this._camLeadX, oy = this._camLeadY;
       if (this.cameraShake > 0.05) {
         ox += Math.sin(this._shakeTime * CONFIG.SHAKE_FREQ * Math.PI * 2)       * this.cameraShake;
@@ -4221,7 +4197,7 @@ class Game {
       ctx.fillRect(w.x, w.y, w.w, w.h);
       ctx.fillStyle = CONFIG.WALL_HP_COLOR;
       ctx.fillRect(w.x, w.y - 9, w.w, 4);
-      ctx.fillStyle = CONFIG.WALL_HP_GOOD_COLOR;
+      ctx.fillStyle = this.getColor("WALL_HP_GOOD_COLOR");
       ctx.fillRect(w.x, w.y - 9, w.w * Utils.clamp(w.hp / w.maxHp, 0, 1), 4);
       this._drawEnvCrackWarning(ctx, w, w.y - 16);
     }
@@ -4297,9 +4273,6 @@ class Game {
     }
 
     // ── Particles ──────────────────────────────────────────────────────
-    // FIX(polish55): fade/cull generic particles once enemy count climbs so
-    // boss telegraphs and player-damage numbers (drawn through their own
-    // untouched paths) stay legible instead of drowning in hit-spark noise.
     const densityT = Utils.clamp(
       (this.enemies.length - CONFIG.PARTICLE_DENSITY_CULL_START) /
       (CONFIG.PARTICLE_DENSITY_CULL_MAX - CONFIG.PARTICLE_DENSITY_CULL_START), 0, 1
@@ -4346,7 +4319,7 @@ class Game {
       const barH = 5  * this.uiScale;
       ctx.fillRect(rx - barW / 2, ry - e.size - barH - 6, barW, barH);
     }
-    ctx.fillStyle = CONFIG.WALL_HP_GOOD_COLOR;
+    ctx.fillStyle = this.getColor("WALL_HP_GOOD_COLOR");
     for (const e of this.enemies) {
       const rx   = Utils.lerp(e.prevX, e.x, alpha);
       const ry   = Utils.lerp(e.prevY, e.y, alpha);
@@ -4632,9 +4605,6 @@ class Game {
   }
 
   spawnParticles(x, y, color, count = 20) {
-    // FIX(a11y3c): reduced-motion previously only touched hitstop/flash/shake
-    // — particle bursts (the most visually "busy" effect) ignored it
-    // entirely. Reuse the same _lowPowerMode-style count reduction.
     let n = count;
     if (this._lowPowerMode)  n = Math.round(n * 0.5);
     if (this._reducedMotion) n = Math.round(n * 0.35);
@@ -4682,24 +4652,12 @@ class Game {
   }
 
   // ── "Corruption" arena mechanic ──────────────────────────────────────────
-
-  // FIX(bigswing4.1): shared helper so ascension mod interactions (and
-  // anything else) can check "is this point inside an active corruption
-  // zone" without duplicating the distance check.
   isInCorruption(x, y) {
     for (const z of this.corruptionZones) {
       if (Utils.distSq(x, y, z.x, z.y) <= z.radius * z.radius) return true;
     }
     return false;
   }
-
-  // FIX(bigswing4.1): corruption is now load-bearing for arena shape, not
-  // just a damage-over-time hazard. Reuses the existing crack-warning /
-  // _pendingDestruction pipeline instead of a new destruction system —
-  // cover caught inside a matured corruption zone gets marked the same way
-  // scheduleEnvironmentalDestruction() already does, opening (or, since the
-  // zone itself blocks safe passage while active, effectively closing)
-  // choke points as a run progresses.
   _reshapeCorruptionArena(z) {
     const rSq = z.maxRadius * z.maxRadius;
     const candidates = [...this.walls, ...this.crates].filter(o => {
@@ -4718,10 +4676,6 @@ class Game {
       this._pendingDestruction.push(target);
     }
   }
-
-  // FIX(bigswing4.1): periodic corruption spawn — a random in-bounds spot,
-  // away from the player so it doesn't spawn on top of them. Uses this.rng()
-  // (not Math.random) so it stays deterministic/seeded in Daily Challenge.
   _schedulePeriodicCorruption() {
     const margin = 80;
     let x, y, tries = 0;
@@ -4750,18 +4704,11 @@ class Game {
       lifetime:  opts.lifetime    ?? CONFIG.CORRUPTION_LIFETIME,
       age:       0,
       motes,
-      // FIX(bigswing4.1): only "core" corruption zones (boss-death/periodic
-      // spawns) reshape the arena — the small kill-triggered pulses from
-      // Corrosive Rounds/mastery mods stay purely a damage effect so every
-      // kill doesn't start chewing through the map.
       reshapesArena: opts.reshapesArena !== false,
       _reshaped: false,
     });
   }
 
-  // FIX(levelup2b): Corrosive Rounds reuses this same zone system for a
-  // small kill-triggered pulse instead of adding a new effect system. A
-  // cooldown on the player keeps kills from spamming overlapping zones.
   _triggerCorrosivePulse(x, y) {
     const p = this.player;
     if (this.gameTime < (p._corrosivePulseReadyAt || 0)) return;
@@ -4770,10 +4717,6 @@ class Game {
   }
 
   // ── Ghost Replay (Daily Challenge) ─────────────────────────────────────
-  // FIX(bigswing4.2): records a compact input event stream (movement/aim/
-  // shoot, not full game state) at 20Hz using the same seeded mulberry32 RNG
-  // and localStorage persistence the rest of daily mode already relies on.
-  // Fully local — no server, no new dependency.
   _recordGhostTick(dx, dy, aimAngle, shooting) {
     const rec = this.ghostRecording;
     if (!rec) return;
@@ -4852,8 +4795,13 @@ class Game {
     for (let i = this.corruptionZones.length - 1; i >= 0; i--) {
       const z = this.corruptionZones[i];
       z.age   += dt;
+      const wasFullySpread = z.radius >= z.maxRadius;
       z.radius = Math.min(z.maxRadius, z.radius + CONFIG.CORRUPTION_SPREAD_RATE * dt);
       const rSq = z.radius * z.radius;
+      if (!wasFullySpread && z.radius >= z.maxRadius && !z._maturedCuePlayed) {
+        z._maturedCuePlayed = true;
+        this.audio.playCorruptionMature();
+      }
 
       if (z.reshapesArena && !z._reshaped && z.radius >= z.maxRadius * 0.5) {
         z._reshaped = true;
@@ -4899,15 +4847,20 @@ class Game {
       ctx.arc(z.x, z.y, z.radius, 0, Math.PI * 2);
       ctx.fill();
 
-      // FIX(a11y3b): shape-only ID previously never touched corruption zones
-      // — they were readable purely by their purple hue. Add a dashed
-      // high-contrast boundary so the danger radius reads independent of
-      // color perception, matching the enemy/boss outline treatment.
       if (this.accessibility.shapeOnlyID) {
         ctx.save();
         ctx.setLineDash([6, 6]);
         ctx.strokeStyle = "rgba(255,255,255,0.85)";
         ctx.lineWidth   = 2;
+        ctx.beginPath();
+        ctx.arc(z.x, z.y, z.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+      if (this.accessibility.colorblindMode) {
+        ctx.save();
+        ctx.strokeStyle = "rgba(230,159,0,0.75)";
+        ctx.lineWidth   = 1.5;
         ctx.beginPath();
         ctx.arc(z.x, z.y, z.radius, 0, Math.PI * 2);
         ctx.stroke();
@@ -4928,9 +4881,6 @@ class Game {
     }
   }
 
-  // FIX(bigswing4.2): lightweight visual reference, not a full player
-  // re-render — a translucent circle + direction wedge + label is enough to
-  // race against without pulling in Player's draw method/animation state.
   _drawGhost(ctx) {
     const g = this.ghostPlayback;
     ctx.save();
@@ -4989,6 +4939,20 @@ class Game {
     Utils.removeFast(this.enemies, index);
   }
 
+  getColor(key) {
+    if (this.accessibility.colorblindMode && CONFIG.COLORBLIND_OVERRIDES[key] !== undefined) {
+      return CONFIG.COLORBLIND_OVERRIDES[key];
+    }
+    return CONFIG[key];
+  }
+
+  getEnemyColor(type) {
+    if (this.accessibility.colorblindMode && CONFIG.COLORBLIND_ENEMY_COLORS[type]) {
+      return CONFIG.COLORBLIND_ENEMY_COLORS[type];
+    }
+    return (ENEMY_TYPES[type] || ENEMY_TYPES.normal).color;
+  }
+
   _saveAccessibility() {
     try { localStorage.setItem("ks_accessibility", JSON.stringify(this.accessibility)); }
     catch {  }
@@ -5005,8 +4969,6 @@ class Game {
     const rm     = this._reducedMotion ? 0.35 : 1;
     const scaled = Math.max(1, Math.round(frames * rm));
     this._hitStopFrames = Math.max(this._hitStopFrames || 0, scaled);
-    // FIX(polish54): duck the ambient bed so the impact that just earned a
-    // hit-stop frame is actually audible against it.
     this.audio.duckAmbient(0.5, 0.08);
   }
 
@@ -5014,23 +4976,9 @@ class Game {
     const rm = this._reducedMotion ? 0.35 : 1;
     this.damageFlash  = Math.min(1, this.damageFlash + 0.35 * intensity * rm);
     this._addShake(CONFIG.SHAKE_MAX * 0.6 * intensity, big);
-    // FIX(polish54): a bigger, longer duck than the hit-stop one — taking
-    // damage should read as the clearest audio moment in the mix.
     this.audio.duckAmbient(0.65, 0.15);
   }
 
-  // FIX(polish52): small, capped camera lead in the direction of aim and
-  // movement so fast play reads as more kinetic. Blended (not renormalized)
-  // so the two weights already sum to the max offset when aligned, and
-  // partially cancel when the player aims one way while strafing another —
-  // that cancellation is intentional, it keeps the lead from ever feeling
-  // erratic. Smoothed toward the target rather than snapping to it, and
-  // scaled down under reduced-motion exactly like shake/hitstop already are.
-  // FIX(polish53): danger-driven ambient intensity — reuses the wave counter,
-  // live enemy count, and corruptionZones array that already exist on Game
-  // rather than tracking anything new. Corruption zones weight heaviest
-  // since they're the most acute on-screen threat; wave and density set the
-  // slow-building floor underneath them.
   _updateAmbientIntensity() {
     const waveLevel      = Utils.clamp(this.wave / 15, 0, 1);
     const densityLevel   = Utils.clamp(this.enemies.length / 25, 0, 1);
