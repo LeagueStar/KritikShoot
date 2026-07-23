@@ -173,6 +173,13 @@ body {
   max-width: 400px;
   padding: var(--space-lg);
   gap: var(--space-md);
+  /* FIX(a11y56): previously only got max-height/overflow-y in the
+     landscape-and-under-500px media query. At X-Large text scale, a tall
+     upgrade grid or accessibility panel could already outgrow the viewport
+     above that breakpoint with no way to reach the rest of it. This is a
+     standing safeguard, not a breakpoint-specific one. */
+  max-height: 92vh;
+  overflow-y: auto;
 }
 
 .screen--overlay {
@@ -314,6 +321,30 @@ body {
 .input-field:focus {
   border-color: var(--col-primary);
   box-shadow: var(--glow-primary), inset 0 0 20px rgba(0, 229, 255, 0.05);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   7b. FOCUS STATES (keyboard navigation)
+   FIX(a11y53): every interactive element gets an explicit, high-contrast
+   focus-visible ring — buttons don't inherit one by default once
+   border-radius/overflow:hidden are in play, and this app has a LOT of
+   dynamically-created buttons (coin shop, level-up, ascension) that all
+   need to share one rule rather than being styled individually.
+   :focus-visible (not :focus) so mouse/touch clicks stay ring-free.
+   ───────────────────────────────────────────────────────────── */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--col-primary);
+  outline-offset: 3px;
+}
+
+.input-field:focus-visible {
+  outline: 2px solid var(--col-primary);
+  outline-offset: 2px;
 }
 
 /* ─────────────────────────────────────────────────────────────
