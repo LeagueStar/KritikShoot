@@ -89,9 +89,17 @@ const CONFIG = Object.freeze({
   WALL_HP_COLOR:        "#e74c3c",
   WALL_HP_GOOD_COLOR:   "#2ecc71",
 
+  // FIX(hook51): ahead/behind-pace HUD colors — same red/green pairing
+  // problem as the HP bars above, so it goes through the same getColor()
+  // override path rather than being drawn with a raw hex value.
+  PACE_AHEAD_COLOR:  "#2ecc71",
+  PACE_BEHIND_COLOR: "#ff6b6b",
+  PACE_NEW_COLOR:    "#f1c40f",
+
   COLORBLIND_OVERRIDES: {
     HUD_COLOR_HP_FG:    "#0072B2", // was #2ecc71 green -> safe blue, vs red bg
     WALL_HP_GOOD_COLOR: "#0072B2", // was #2ecc71 green -> safe blue, vs red bar
+    PACE_AHEAD_COLOR:   "#0072B2", // was #2ecc71 green -> safe blue, vs behind-red
   },
 
   COLORBLIND_ENEMY_COLORS: {
@@ -2303,7 +2311,6 @@ class UIManager {
     this._renderLeaderboard();
     this._renderCoinShop();
     this._renderDailyHistory();
-    this._updateResumeButton();
     this._layoutCoinShop();
     this._applyTextScale();
     window.addEventListener("resize", () => this._layoutCoinShop());
@@ -2556,14 +2563,6 @@ class UIManager {
       });
     }
 
-    const resumeBtn = document.getElementById("resumeBtn");
-    if (resumeBtn) {
-      resumeBtn.addEventListener("click", () => {
-        if (this._shouldShowMobileUI()) attemptLandscapeLock();
-        if (!this.game.resumeRun()) this._updateResumeButton();
-      });
-    }
-
     const restartBtn = document.getElementById("restartBtn");
     if (restartBtn) {
       restartBtn.addEventListener("click", () => {
@@ -2609,11 +2608,6 @@ class UIManager {
         this.game.lastTime = performance.now();
       });
     });
-  }
-
-  _updateResumeButton() {
-    const btn = document.getElementById("resumeBtn");
-    if (btn) btn.classList.toggle("hidden", !this.game.hasSavedRun());
   }
 
   _shouldShowMobileUI() {
@@ -2760,13 +2754,11 @@ class UIManager {
     let coinsEarned = 0;
     if (g.player) coinsEarned = this._finalizeRun();
 
-    g.clearSavedRun();
     this._pendingAscension = null;
 
     this.game.fsm.transition(GameState.MENU);
     this._renderLeaderboard();
     this._renderCoinShop();
-    this._updateResumeButton();
 
     if (coinsEarned > 0) this._showQuitToast(`+${coinsEarned} coins earned — returning to menu`);
   }
@@ -2832,8 +2824,6 @@ class UIManager {
       this._lastDailyResult = null;
       copyBtn?.classList.add("hidden");
     }
-
-    this._updateResumeButton();
   }
 
   _updateDailyResult(result) {
@@ -3006,7 +2996,24 @@ class UIManager {
       ctx.fillText(`\u{1F47B} Ghost PB: Wave ${g.ghostPlayback.wave}`, m, m + lh * 2);
     }
 
-    const hbY = m + lh * (showGhostLine ? 3 : 2) + 6;
+    // FIX(hook53): pace-ghost line — every run, not just Daily Challenge.
+    // Sits on its own line below the daily ghost line when both are present.
+    const paceLineY = m + lh * (showGhostLine ? 3 : 2);
+    let showPaceLine = g._paceDeltaState !== "none";
+    if (showPaceLine) {
+      ctx.font = `700 ${Math.max(12, 14 * s)}px ${CONFIG.HUD_FONT}`;
+      if (g._paceDeltaState === "new") {
+        ctx.fillStyle = g.getColor("PACE_NEW_COLOR");
+        ctx.fillText("\u{1F3C1} New pace record!", m, paceLineY);
+      } else {
+        const ahead = g._paceDeltaState === "ahead";
+        ctx.fillStyle = g.getColor(ahead ? "PACE_AHEAD_COLOR" : "PACE_BEHIND_COLOR");
+        const arrow = ahead ? "\u25B2" : "\u25BC";
+        ctx.fillText(`${arrow} ${g._paceDeltaSeconds.toFixed(1)}s ${ahead ? "ahead of" : "behind"} pace`, m, paceLineY);
+      }
+    }
+
+    const hbY = m + lh * (showGhostLine ? 3 : 2) + (showPaceLine ? lh + 6 : 6);
     const hbW = 180 * s;
     const hbH = 10  * s;
     const hpR = Utils.clamp(p.health / p.maxHealth, 0, 1);
@@ -3265,6 +3272,7 @@ class WaveSystem {
     advanceWave(ctx) {
     ctx.wave++;
     ctx.addShake(CONFIG.SHAKE_MAX);
+    ctx.recordPace(ctx.wave, ctx.gameTime);
     ctx.isBossWave = this.isBossWave(ctx.wave);
     if (ctx.isBossWave) {
       ctx.boss = ctx.createBoss();
@@ -3566,6 +3574,17 @@ class Game {
     this.ghostRecording = null;
     this.ghostPlayback  = null;
 
+    // FIX(hook52): "beat your ghost" pacing — a personal-best time-to-reach-
+    // each-wave curve, built from every run (daily or not), unlike the
+    // seeded Daily Challenge ghost replay above which only exists for
+    // Daily Challenge. See _recordPaceIfBest/_getPaceDelta.
+    this._paceBest = this._loadPaceBest();
+    this._paceIsNewBest = false;
+    this._paceMaxWaveEver = Object.keys(this._paceBest).reduce((m, k) => Math.max(m, Number(k)), 0);
+    this._paceDeltaState   = "none";
+    this._paceDeltaSeconds = 0;
+    this._paceUpdateTimer  = 0;
+
     this._FIXED_STEP  = 1 / 60;
     this._accumulator = 0;
     this._hitStopFrames = 0;
@@ -3595,14 +3614,11 @@ class Game {
 
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
-        this.saveRunSnapshot();
         if (this.fsm.is(GameState.PLAYING) || this.fsm.is(GameState.WAVE_TRANSITION)) {
           this.fsm.transition(GameState.PAUSED);
         }
       }
     });
-
-    window.addEventListener("beforeunload", () => this.saveRunSnapshot());
 
     const portraitQuery = window.matchMedia("(orientation: portrait) and (hover: none) and (pointer: coarse)");
     const onPortraitChange = mq => {
@@ -3651,8 +3667,10 @@ class Game {
       schedulePeriodicCorruption: () => game._schedulePeriodicCorruption(),
       addShake: (amount) => game._addShake(amount),
       playBossTelegraph: () => game.audio.playBossTelegraph(),
+      recordPace: (wave, time) => game._recordPaceIfBest(wave, time),
       get wave()               { return game.wave; },
       set wave(v)               { game.wave = v; },
+      get gameTime()            { return game.gameTime; },
       get kills()               { return game.kills; },
       set kills(v)               { game.kills = v; },
       get boss()               { return game.boss; },
@@ -3681,7 +3699,6 @@ class Game {
       })
       .register(GameState.GAME_OVER, {
         enter: () => {
-          this.clearSavedRun();
           this.ui.showScreen(GameState.GAME_OVER);
           this.ui.showGameOver();
           this.audio.stopAmbient();
@@ -3711,7 +3728,6 @@ class Game {
   start(options = {}) {
     cancelAnimationFrame(this._rafId);
 
-    this.clearSavedRun();
     this.ui.clearPendingAscension();
 
     if (this.bullets) {
@@ -3753,6 +3769,10 @@ class Game {
     this._camLeadX    = 0;
     this._camLeadY    = 0;
     this._lowHealthCueTimer = 0;
+    this._paceUpdateTimer  = 0;
+    this._paceIsNewBest    = false;
+    this._paceDeltaState   = "none";
+    this._paceDeltaSeconds = 0;
     this._accumulator = 0;
     this.trailMgr.clear();
 
@@ -3776,158 +3796,6 @@ class Game {
     this.audio.setAmbientIntensity(0);
 
     this._rafId = requestAnimationFrame(ts => this._loop(ts));
-  }
-
-  // ── Mid-run persistence (save & resume) ──────────────────────────────────
-
-  saveRunSnapshot() {
-    if (!this.player || !this.player.alive) return;
-    if (this.fsm.is(GameState.MENU) || this.fsm.is(GameState.GAME_OVER)) return;
-    try {
-      const p = this.player;
-      const snap = {
-        v: 1,
-        dailyMode:            this.dailyMode,
-        dailySeedDate:        this.dailySeedDate,
-        wave:                 this.wave,
-        kills:                this.kills,
-        gameTime:             this.gameTime,
-        isBossWave:           this._isBossWave,
-        bossWarning:          this._bossWarning,
-        waveTransitionTimer:  this._waveTransitionTimer,
-        fsmState:             this.fsm.state,
-        pendingAscension:     this.ui.hasPendingAscension(),
-        player: {
-          x: p.x, y: p.y, health: p.health, alive: p.alive,
-          stats:               { ...p.stats },
-          upgrades:            { ...p.upgrades },
-          weapon:               p.weapon,
-          weaponShots:          { ...p.weaponShots },
-          mods:                 { ...p.mods },
-          ascensionLevelsSeen:  Array.from(p._ascensionLevelsSeen),
-        },
-        walls:   this.walls.map(w => ({ x: w.x, y: w.y, w: w.w, h: w.h, hp: w.hp, maxHp: w.maxHp })),
-        crates:  this.crates.map(c => ({ x: c.x, y: c.y, w: c.w, h: c.h, isPillar: c.isPillar })),
-        enemies: this.enemies.filter(e => e.alive)
-          .map(e => ({ x: e.x, y: e.y, type: e.type, hp: e.hp, maxHp: e.maxHp })),
-        boss: (this.boss && this.boss.alive)
-          ? { x: this.boss.x, y: this.boss.y, hp: this.boss.hp, maxHp: this.boss.maxHp }
-          : null,
-      };
-      localStorage.setItem("ks_saved_run", JSON.stringify(snap));
-    } catch {  }
-  }
-
-  hasSavedRun() {
-    try { return !!localStorage.getItem("ks_saved_run"); } catch { return false; }
-  }
-
-  loadRunSnapshot() {
-    try {
-      const raw = localStorage.getItem("ks_saved_run");
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object") return null;
-      if (!Array.isArray(parsed.enemies) || !Array.isArray(parsed.walls) || !parsed.player) return null;
-      return parsed;
-    } catch { return null; }
-  }
-
-  clearSavedRun() {
-    try { localStorage.removeItem("ks_saved_run"); } catch {  }
-  }
-
-    resumeRun() {
-    const snap = this.loadRunSnapshot();
-    if (!snap) return false;
-
-    cancelAnimationFrame(this._rafId);
-
-    if (this.bullets)   for (const b of this.bullets)   { b.active = false; this.bulletPool.release(b); }
-    if (this.particles) for (const p of this.particles) { p.active = false; this.particlePool.release(p); }
-
-    this.dailyMode     = !!snap.dailyMode;
-    this.dailySeedDate = snap.dailySeedDate || Utils.todayUTCString();
-    this.rng = this.dailyMode
-      ? Utils.createSeededRNG(`kritikshoot-daily-${this.dailySeedDate}`)
-      : Math.random;
-    this.ghostRecording = this.dailyMode ? { samples: [], tickCounter: 0 } : null;
-    this._loadGhost();
-
-    this.player = new Player(this);
-    this.player.x       = snap.player.x;
-    this.player.y       = snap.player.y;
-    this.player.prevX   = snap.player.x;
-    this.player.prevY   = snap.player.y;
-    this.player.health  = snap.player.health;
-    this.player.alive   = snap.player.alive;
-    this.player.weapon  = snap.player.weapon || "default";
-    this.player.stats       = { ...snap.player.stats };
-    this.player.upgrades    = { ...this.player.upgrades, ...snap.player.upgrades };
-    this.player.weaponShots = { ...this.player.weaponShots, ...snap.player.weaponShots };
-    this.player.mods        = { ...(snap.player.mods || {}) };
-    this.player._ascensionLevelsSeen = new Set(snap.player.ascensionLevelsSeen || []);
-
-    this.wave     = snap.wave;
-    this.kills    = snap.kills;
-    this.gameTime = snap.gameTime;
-    this._isBossWave          = !!snap.isBossWave;
-    this._bossWarning         = !!snap.bossWarning;
-    this._waveTransitionTimer = snap.waveTransitionTimer || 0;
-
-    this.enemies = snap.enemies.map(e => {
-      const en = new Enemy(this, e.x, e.y, e.type, 1);
-      en.hp = e.hp; en.maxHp = e.maxHp;
-      return en;
-    });
-    this.bullets   = [];
-    this.particles = [];
-    this.walls   = snap.walls.map(w => ({ ...w }));
-    this.crates  = snap.crates.map(c => ({ ...c }));
-    this._rebuildWallHash();
-    this._pendingDestruction = [];
-    this._coverBaseline      = this.walls.length + this.crates.length;
-
-    this.corruptionZones  = [];
-    this._bossDeathBursts = [];
-
-    this.boss = null;
-    if (snap.boss) {
-      this.boss = new Boss(this);
-      this.boss.hp    = snap.boss.hp;
-      this.boss.maxHp = snap.boss.maxHp;
-      this.boss.x     = snap.boss.x;
-      this.boss.y     = snap.boss.y;
-    }
-
-    this.cameraShake = 0; this.damageFlash = 0; this._shakeTime = 0;
-    this.thudShake    = 0; this._thudTime  = 0;
-    this._camLeadX    = 0; this._camLeadY  = 0;
-    this._lowHealthCueTimer = 0;
-    this._accumulator = 0;
-    this.trailMgr.clear();
-    this._deadBullets = 0; this._deadParticles = 0;
-    this.damageNumbers = [];
-
-    this.setWeaponLabel({ default: "GUN", spread: "SHOTGUN", laser: "LASER" }[this.player.weapon] || "GUN");
-
-    this.clearSavedRun();
-    this.ui._updateResumeButton();
-
-    const targetState = (snap.fsmState === GameState.WAVE_TRANSITION) ? GameState.WAVE_TRANSITION
-                       : (snap.fsmState === GameState.LEVEL_UP)        ? GameState.LEVEL_UP
-                       : GameState.PLAYING;
-    this.fsm.transition(targetState);
-    this.lastTime = performance.now();
-
-    if (targetState === GameState.LEVEL_UP) {
-      if (snap.pendingAscension) this.ui.showAscensionChoice();
-      else                       this.ui.showLevelUp();
-    }
-
-    this._rafId = requestAnimationFrame(ts => this._loop(ts));
-    this.audio.startAmbient();
-    return true;
   }
 
   // ── Game Loop ──────────────────────────────────────────────────────────────
@@ -4043,6 +3911,14 @@ class Game {
     if (this._ambientUpdateTimer <= 0) {
       this._ambientUpdateTimer = 1.2;
       this._updateAmbientIntensity();
+    }
+
+    // FIX(hook54): the pace-ghost delta only needs to feel live, not be
+    // frame-perfect — a 0.5s refresh keeps the HUD draw path allocation-free.
+    this._paceUpdateTimer -= dt;
+    if (this._paceUpdateTimer <= 0) {
+      this._paceUpdateTimer = 0.5;
+      this._updatePaceDelta();
     }
 
     this.player.update(dt, this.input);
@@ -4714,6 +4590,62 @@ class Game {
     if (this.gameTime < (p._corrosivePulseReadyAt || 0)) return;
     p._corrosivePulseReadyAt = this.gameTime + 1.5;
     this.scheduleCorruptionZone(x, y, { startRadius: 12, maxRadius: 44, lifetime: 3.5, reshapesArena: false });
+  }
+
+  // ── Pace Ghost (every run — FIX(hook51..54)) ────────────────────────────
+  // PART 3 DESIGN CHOICE: option A, ghost racing as a core loop, chosen over
+  // B (corruption risk/reward) and C (build identity on the player sprite).
+  // Reasoning: the daily ghost replay (FIX(bigswing4.2)) already proved this
+  // hook works, but it's gated behind a once-a-day mode most sessions never
+  // touch. Surfacing it in every run turns the existing differentiator into
+  // the primary retention loop with the least new surface area — no new
+  // economy to balance/exploit-test (option B) and no new art/identity
+  // system to maintain across every ascension path (option C). It also
+  // composes with corruption and ascension mods rather than competing with
+  // them for design space.
+  //
+  // Unlike the seeded Daily Challenge ghost above (which replays actual
+  // recorded movement and only exists once a day), this is a lightweight
+  // personal-best "time to first reach wave N" curve that updates from
+  // every run, daily or not, and drives a live ahead/behind-pace HUD read-
+  // out during every single run — turning ordinary play into a race
+  // against your own history instead of a once-a-day event.
+  _loadPaceBest() {
+    try {
+      const raw = localStorage.getItem("ks_pace_best");
+      const parsed = raw ? JSON.parse(raw) : {};
+      return (parsed && typeof parsed === "object") ? parsed : {};
+    } catch (e) { return {}; }
+  }
+
+  _recordPaceIfBest(wave, time) {
+    if (typeof time !== "number" || !Number.isFinite(time)) return;
+    const prev = this._paceBest[wave];
+    if (prev === undefined) {
+      this._paceIsNewBest = true;
+      this._paceMaxWaveEver = Math.max(this._paceMaxWaveEver || 0, wave);
+    } else if (time < prev) {
+      this._paceIsNewBest = true;
+    } else {
+      this._paceIsNewBest = false;
+      return;
+    }
+    this._paceBest[wave] = time;
+    try { localStorage.setItem("ks_pace_best", JSON.stringify(this._paceBest)); } catch (e) {  }
+  }
+
+  // Refreshed periodically from _update (see _ambientUpdateTimer sibling
+  // below), not computed inside the draw call — keeps the HUD draw path
+  // allocation-free, just reading _paceDeltaState/_paceDeltaSeconds.
+  _updatePaceDelta() {
+    const best = this._paceBest[this.wave];
+    if (best === undefined) { this._paceDeltaState = "none"; this._paceDeltaSeconds = 0; return; }
+    if (this._paceIsNewBest && this.wave === this._paceMaxWaveEver) {
+      this._paceDeltaState = "new"; this._paceDeltaSeconds = 0; return;
+    }
+    const delta = best - this.gameTime;
+    this._paceDeltaState   = delta >= 0 ? "ahead" : "behind";
+    this._paceDeltaSeconds = Math.abs(delta);
   }
 
   // ── Ghost Replay (Daily Challenge) ─────────────────────────────────────
