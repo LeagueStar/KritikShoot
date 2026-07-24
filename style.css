@@ -1,17 +1,9 @@
-/* =============================================================
-   KritikShoot — style.css
-   Architecture : CSS Custom Properties → Components → Utilities
-   Design System: Neon-Noir / Cyberpunk HUD aesthetic
-   Fonts        : Orbitron (display) + Rajdhani (UI body)
-   ============================================================= */
 
 /* ─────────────────────────────────────────────────────────────
    1. DESIGN TOKENS
    ───────────────────────────────────────────────────────────── */
 :root {
   --ui-scale: 1;
-  /* FIX(a11y3b): default for the accessibility Text Size setting; overridden
-     by UIManager._applyTextScale() from the saved/selected value. */
   --text-scale: 1;
 
   
@@ -173,11 +165,6 @@ body {
   max-width: 400px;
   padding: var(--space-lg);
   gap: var(--space-md);
-  /* FIX(a11y56): previously only got max-height/overflow-y in the
-     landscape-and-under-500px media query. At X-Large text scale, a tall
-     upgrade grid or accessibility panel could already outgrow the viewport
-     above that breakpoint with no way to reach the rest of it. This is a
-     standing safeguard, not a breakpoint-specific one. */
   max-height: 92vh;
   overflow-y: auto;
 }
@@ -325,12 +312,6 @@ body {
 
 /* ─────────────────────────────────────────────────────────────
    7b. FOCUS STATES (keyboard navigation)
-   FIX(a11y53): every interactive element gets an explicit, high-contrast
-   focus-visible ring — buttons don't inherit one by default once
-   border-radius/overflow:hidden are in play, and this app has a LOT of
-   dynamically-created buttons (coin shop, level-up, ascension) that all
-   need to share one rule rather than being styled individually.
-   :focus-visible (not :focus) so mouse/touch clicks stay ring-free.
    ───────────────────────────────────────────────────────────── */
 button:focus-visible,
 a:focus-visible,
@@ -697,10 +678,6 @@ button:active {
   transition: opacity var(--dur-fast);
 }
 
-/* FIX(ui2): GAME_OVER previously only added the same .paused dimming class,
-   so the joystick/fire/weapon buttons kept rendering (at reduced opacity)
-   underneath the death screen's run-summary panel. On GAME_OVER they should
-   be fully removed instead, since there's nothing left to control. */
 .mobile-ui.game-over .joystick,
 .mobile-ui.game-over .btn--shoot,
 .mobile-ui.game-over .btn--weapon,
@@ -871,11 +848,6 @@ button:active {
   box-shadow: 0 0 28px rgba(0, 229, 255, 0.12);
 }
 
-/* FIX(ui2): on small/landscape viewports the fixed bottom-right shop could
-   cover the leaderboard, daily strip, or DEPLOY button. UIManager reparents
-   #coinShop into #startScreen's .screen__inner on those viewports and adds
-   this class, turning it into a normal, non-overlapping block in the menu's
-   own layout flow instead of an independently-floating panel. */
 .coin-shop--docked {
   position: static;
   width: 100%;
@@ -1369,10 +1341,6 @@ button:active {
   color: rgba(10, 14, 22, 0.7);   
 }
 
-/* FIX(levelup2b): build-defining level-up choice — reuses the ascension
-   button's title/desc layout, spans the full grid width, and gets a
-   distinct accent so it reads as a different kind of choice from the
-   plain numeric upgrades around it. */
 .btn--buildmod {
   grid-column: 1 / -1;
   display: flex;
