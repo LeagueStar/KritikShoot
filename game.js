@@ -52,6 +52,24 @@ const CONFIG = Object.freeze({
   PARTICLE_DENSITY_CULL_MAX:   70,
   PARTICLE_DENSITY_MIN_ALPHA:  0.32,
 
+  DUCK_HITSTOP_DEPTH:   0.5,
+  DUCK_HITSTOP_HOLD:    0.08,
+  DUCK_DAMAGE_DEPTH:    0.65,
+  DUCK_DAMAGE_HOLD:     0.15,
+
+  AMBIENT_WAVE_DIVISOR:       15,
+  AMBIENT_DENSITY_DIVISOR:    25,
+  AMBIENT_CORRUPTION_DIVISOR: 3,
+  AMBIENT_WAVE_WEIGHT:        0.5,
+  AMBIENT_DENSITY_WEIGHT:     0.2,
+  AMBIENT_CORRUPTION_WEIGHT:  0.3,
+  AMBIENT_UPDATE_INTERVAL:    1.2,
+
+  PACE_UPDATE_INTERVAL: 0.5,
+
+  LOW_HEALTH_THRESHOLD: 0.25,
+  LOW_HEALTH_CUE_COOLDOWN: 2.2,
+
   PARTICLE_FRICTION:    0.88,
   PARTICLE_DECAY:       0.94,
 
@@ -88,10 +106,6 @@ const CONFIG = Object.freeze({
   WALL_COLOR:           "#1a2033",
   WALL_HP_COLOR:        "#e74c3c",
   WALL_HP_GOOD_COLOR:   "#2ecc71",
-
-  // FIX(hook51): ahead/behind-pace HUD colors — same red/green pairing
-  // problem as the HP bars above, so it goes through the same getColor()
-  // override path rather than being drawn with a raw hex value.
   PACE_AHEAD_COLOR:  "#2ecc71",
   PACE_BEHIND_COLOR: "#ff6b6b",
   PACE_NEW_COLOR:    "#f1c40f",
@@ -2996,8 +3010,6 @@ class UIManager {
       ctx.fillText(`\u{1F47B} Ghost PB: Wave ${g.ghostPlayback.wave}`, m, m + lh * 2);
     }
 
-    // FIX(hook53): pace-ghost line — every run, not just Daily Challenge.
-    // Sits on its own line below the daily ghost line when both are present.
     const paceLineY = m + lh * (showGhostLine ? 3 : 2);
     let showPaceLine = g._paceDeltaState !== "none";
     if (showPaceLine) {
@@ -3293,10 +3305,17 @@ class WaveSystem {
 
 // ── CombatSystem ────────────────────────────────────────────────
 class CombatSystem {
+  constructor() {
+    this._weaponHitCounts = { default: 0, spread: 0, laser: 0 };
+  }
+
   resolveBulletCollisions(ctx) {
     const enemyIndexMap = new Map();
     for (let i = 0; i < ctx.enemies.length; i++) enemyIndexMap.set(ctx.enemies[i], i);
-    const weaponHitsThisFrame = { default: 0, spread: 0, laser: 0 };
+    const weaponHitsThisFrame = this._weaponHitCounts;
+    weaponHitsThisFrame.default = 0;
+    weaponHitsThisFrame.spread  = 0;
+    weaponHitsThisFrame.laser   = 0;
 
     for (let i = 0; i < ctx.bullets.length; i++) {
       const b = ctx.bullets[i];
@@ -3573,11 +3592,6 @@ class Game {
     this.rng       = Math.random;
     this.ghostRecording = null;
     this.ghostPlayback  = null;
-
-    // FIX(hook52): "beat your ghost" pacing — a personal-best time-to-reach-
-    // each-wave curve, built from every run (daily or not), unlike the
-    // seeded Daily Challenge ghost replay above which only exists for
-    // Daily Challenge. See _recordPaceIfBest/_getPaceDelta.
     this._paceBest = this._loadPaceBest();
     this._paceIsNewBest = false;
     this._paceMaxWaveEver = Object.keys(this._paceBest).reduce((m, k) => Math.max(m, Number(k)), 0);
@@ -3909,15 +3923,13 @@ class Game {
 
     this._ambientUpdateTimer -= dt;
     if (this._ambientUpdateTimer <= 0) {
-      this._ambientUpdateTimer = 1.2;
+      this._ambientUpdateTimer = CONFIG.AMBIENT_UPDATE_INTERVAL;
       this._updateAmbientIntensity();
     }
 
-    // FIX(hook54): the pace-ghost delta only needs to feel live, not be
-    // frame-perfect — a 0.5s refresh keeps the HUD draw path allocation-free.
     this._paceUpdateTimer -= dt;
     if (this._paceUpdateTimer <= 0) {
-      this._paceUpdateTimer = 0.5;
+      this._paceUpdateTimer = CONFIG.PACE_UPDATE_INTERVAL;
       this._updatePaceDelta();
     }
 
@@ -4030,8 +4042,8 @@ class Game {
     }
     if (this.player && this.player.alive) {
       this._lowHealthCueTimer = Math.max(0, (this._lowHealthCueTimer || 0) - dt);
-      if (this.player.health / this.player.maxHealth <= 0.25 && this._lowHealthCueTimer <= 0) {
-        this._lowHealthCueTimer = 2.2;
+      if (this.player.health / this.player.maxHealth <= CONFIG.LOW_HEALTH_THRESHOLD && this._lowHealthCueTimer <= 0) {
+        this._lowHealthCueTimer = CONFIG.LOW_HEALTH_CUE_COOLDOWN;
         this.audio.playLowHealth();
       }
     }
@@ -4592,24 +4604,6 @@ class Game {
     this.scheduleCorruptionZone(x, y, { startRadius: 12, maxRadius: 44, lifetime: 3.5, reshapesArena: false });
   }
 
-  // ── Pace Ghost (every run — FIX(hook51..54)) ────────────────────────────
-  // PART 3 DESIGN CHOICE: option A, ghost racing as a core loop, chosen over
-  // B (corruption risk/reward) and C (build identity on the player sprite).
-  // Reasoning: the daily ghost replay (FIX(bigswing4.2)) already proved this
-  // hook works, but it's gated behind a once-a-day mode most sessions never
-  // touch. Surfacing it in every run turns the existing differentiator into
-  // the primary retention loop with the least new surface area — no new
-  // economy to balance/exploit-test (option B) and no new art/identity
-  // system to maintain across every ascension path (option C). It also
-  // composes with corruption and ascension mods rather than competing with
-  // them for design space.
-  //
-  // Unlike the seeded Daily Challenge ghost above (which replays actual
-  // recorded movement and only exists once a day), this is a lightweight
-  // personal-best "time to first reach wave N" curve that updates from
-  // every run, daily or not, and drives a live ahead/behind-pace HUD read-
-  // out during every single run — turning ordinary play into a race
-  // against your own history instead of a once-a-day event.
   _loadPaceBest() {
     try {
       const raw = localStorage.getItem("ks_pace_best");
@@ -4901,21 +4895,25 @@ class Game {
     const rm     = this._reducedMotion ? 0.35 : 1;
     const scaled = Math.max(1, Math.round(frames * rm));
     this._hitStopFrames = Math.max(this._hitStopFrames || 0, scaled);
-    this.audio.duckAmbient(0.5, 0.08);
+    this.audio.duckAmbient(CONFIG.DUCK_HITSTOP_DEPTH, CONFIG.DUCK_HITSTOP_HOLD);
   }
 
   triggerDamageFlash(intensity = 1.0, big = false) {
     const rm = this._reducedMotion ? 0.35 : 1;
     this.damageFlash  = Math.min(1, this.damageFlash + 0.35 * intensity * rm);
     this._addShake(CONFIG.SHAKE_MAX * 0.6 * intensity, big);
-    this.audio.duckAmbient(0.65, 0.15);
+    this.audio.duckAmbient(CONFIG.DUCK_DAMAGE_DEPTH, CONFIG.DUCK_DAMAGE_HOLD);
   }
 
   _updateAmbientIntensity() {
-    const waveLevel      = Utils.clamp(this.wave / 15, 0, 1);
-    const densityLevel   = Utils.clamp(this.enemies.length / 25, 0, 1);
-    const corruptionLevel = Utils.clamp(this.corruptionZones.length / 3, 0, 1);
-    this.audio.setAmbientIntensity(waveLevel * 0.5 + densityLevel * 0.2 + corruptionLevel * 0.3);
+    const waveLevel      = Utils.clamp(this.wave / CONFIG.AMBIENT_WAVE_DIVISOR, 0, 1);
+    const densityLevel   = Utils.clamp(this.enemies.length / CONFIG.AMBIENT_DENSITY_DIVISOR, 0, 1);
+    const corruptionLevel = Utils.clamp(this.corruptionZones.length / CONFIG.AMBIENT_CORRUPTION_DIVISOR, 0, 1);
+    this.audio.setAmbientIntensity(
+      waveLevel * CONFIG.AMBIENT_WAVE_WEIGHT +
+      densityLevel * CONFIG.AMBIENT_DENSITY_WEIGHT +
+      corruptionLevel * CONFIG.AMBIENT_CORRUPTION_WEIGHT
+    );
   }
 
   _updateCameraLead(dt) {
