@@ -7,8 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>KritikShoot — Survival Shooter</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet" />
+  <!-- FIX(theme1): no external font link — see the font-stack comment in style.css -->
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
@@ -38,13 +37,16 @@
           <span class="btn__label">DEPLOY</span>
           <span class="btn__glow"></span>
         </button>
+        <div class="menu-utility-row">
+          <button id="leaderboardBtn" class="btn btn--menu-util" aria-haspopup="dialog">🏆 LEADERBOARD</button>
+          <button id="upgradesBtn" class="btn btn--menu-util" aria-haspopup="dialog">🛠 UPGRADES</button>
+        </div>
         <label class="daily-toggle" for="dailyModeToggle">
           <input type="checkbox" id="dailyModeToggle" />
           <span class="daily-toggle__label">Daily Challenge <span id="dailyDateLabel" class="daily-toggle__date"></span></span>
         </label>
         <div id="dailyHistoryStrip" class="daily-history"></div>
       </div>
-      <div id="localLeaderboard" class="leaderboard" aria-label="Local Leaderboard"></div>
     </div>
   </div>
 
@@ -205,6 +207,33 @@
   </div>
 
   <div
+    id="leaderboardScreen"
+    class="screen screen--overlay glass-panel hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Local Leaderboard"
+  >
+    <div class="screen__inner screen__inner--compact howto-inner">
+      <button id="leaderboardCloseBtn" class="btn btn--close" aria-label="Close">✕</button>
+      <h2 class="screen__title">LEADERBOARD</h2>
+      <div id="localLeaderboard" class="leaderboard" aria-label="Local Leaderboard"></div>
+    </div>
+  </div>
+
+  <div
+    id="upgradesScreen"
+    class="screen screen--overlay glass-panel hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Upgrade Depot"
+  >
+    <div class="screen__inner screen__inner--compact howto-inner">
+      <button id="upgradesCloseBtn" class="btn btn--close" aria-label="Close">✕</button>
+      <div id="coinShop" class="coin-shop" aria-label="Persistent Upgrade Shop"></div>
+    </div>
+  </div>
+
+  <div
     id="ascensionScreen"
     class="screen screen--overlay glass-panel hidden"
     role="dialog"
@@ -224,8 +253,6 @@
     <button id="copyResultBtn" class="btn btn--menu hidden" aria-label="Copy Daily Result">📋 Copy Result</button>
     <button id="menuBtn"    class="btn btn--menu"   aria-label="Return to Main Menu">⌂ Main Menu</button>
   </div>
-
-  <div id="coinShop" class="coin-shop hidden" aria-label="Persistent Upgrade Shop"></div>
 
   <script src="./game.js" defer></script>
 </body>
