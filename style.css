@@ -6,28 +6,33 @@
   --text-scale: 1;
 
   
-  --col-bg: #050810;
-  --col-bg-mid: #0a0e1a;
-  --col-glass: rgba(8, 14, 30, 0.72);
-  --col-glass-border: rgba(0, 220, 255, 0.18);
-  --col-glass-shine: rgba(0, 220, 255, 0.06);
+  --col-bg: #0d0906;
+  --col-bg-mid: #15100a;
+  --col-glass: rgba(28, 18, 10, 0.72);
+  --col-glass-border: rgba(230, 140, 40, 0.18);
+  --col-glass-shine: rgba(230, 140, 40, 0.06);
 
-  --col-primary: #00e5ff;
-  --col-primary-dim: rgba(0, 229, 255, 0.15);
-  --col-primary-glow: rgba(0, 229, 255, 0.55);
+  --col-primary: #e6862c;
+  --col-primary-dim: rgba(230, 140, 40, 0.15);
+  --col-primary-glow: rgba(230, 140, 40, 0.55);
 
-  --col-accent: #ff2d55;
-  --col-accent-dim: rgba(255, 45, 85, 0.15);
-  --col-accent-glow: rgba(255, 45, 85, 0.55);
+  --col-accent: #ff3d2e;
+  --col-accent-dim: rgba(255, 61, 46, 0.15);
+  --col-accent-glow: rgba(255, 61, 46, 0.55);
 
-  --col-success: #2ecc71;
+  --col-success: #a3b565;
   --col-warn: #f39c12;
-  --col-text: #e8f0fe;
-  --col-text-muted: rgba(232, 240, 254, 0.5);
+  --col-text: #f1e8da;
+  --col-text-muted: rgba(241, 232, 218, 0.5);
 
-  
-  --font-display: 'Orbitron', monospace;
-  --font-ui: 'Rajdhani', sans-serif;
+  /* FIX(theme1): Orbitron/Rajdhani were previously pulled from fonts.googleapis.com —
+     a live third-party network call at load time, violating the zero-dependency /
+     pure-client-side requirement. Replaced with a condensed-leaning system-font
+     stack: zero network requests, zero added file size, and -apple-system/Segoe UI
+     Semibold/Roboto Condensed all read as bold, technical "HUD" faces at the
+     weights/letter-spacing already used across the UI (700/900 + wide tracking). */
+  --font-display: -apple-system, "Segoe UI Semibold", "Segoe UI", "Roboto Condensed", "Arial Narrow", sans-serif;
+  --font-ui: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 
   
   --space-xs: 4px;
@@ -44,8 +49,8 @@
 
   
   --shadow-panel: 0 24px 64px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--col-glass-border);
-  --glow-primary: 0 0 12px var(--col-primary-glow), 0 0 30px rgba(0, 229, 255, 0.2);
-  --glow-accent: 0 0 12px var(--col-accent-glow), 0 0 30px rgba(255, 45, 85, 0.2);
+  --glow-primary: 0 0 12px var(--col-primary-glow), 0 0 30px rgba(230, 140, 40, 0.2);
+  --glow-accent: 0 0 12px var(--col-accent-glow), 0 0 30px rgba(255, 61, 46, 0.2);
 
   
   --ease-snap: cubic-bezier(0.175, 0.885, 0.32, 1.275);
@@ -83,8 +88,8 @@ body {
   background-image: repeating-linear-gradient(0deg,
       transparent,
       transparent 3px,
-      rgba(0, 229, 255, 0.012) 3px,
-      rgba(0, 229, 255, 0.012) 4px);
+      rgba(230, 140, 40, 0.012) 3px,
+      rgba(230, 140, 40, 0.012) 4px);
 }
 
 .sr-only {
@@ -120,11 +125,11 @@ body {
    ───────────────────────────────────────────────────────────── */
 .glass-panel {
   background: var(--col-glass);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.1);
+  -webkit-backdrop-filter: blur(18px) saturate(1.1);
   border: 1px solid var(--col-glass-border);
-  box-shadow: var(--shadow-panel);
-  background-image: linear-gradient(135deg, var(--col-glass-shine) 0%, transparent 60%);
+  box-shadow: var(--shadow-panel), inset 0 1px 0 rgba(255, 200, 140, 0.05), inset 0 0 40px rgba(0, 0, 0, 0.3);
+  background-image: linear-gradient(150deg, var(--col-glass-shine) 0%, transparent 55%);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -228,8 +233,8 @@ body {
   letter-spacing: 4px;
   text-shadow:
     0 0 20px var(--col-primary-glow),
-    0 0 60px rgba(0, 229, 255, 0.3),
-    0 0 100px rgba(0, 229, 255, 0.1);
+    0 0 60px rgba(230, 140, 40, 0.3),
+    0 0 100px rgba(230, 140, 40, 0.1);
   animation: neon-flicker 6s ease-in-out infinite;
   
   will-change: opacity;
@@ -306,7 +311,7 @@ body {
 
 .input-field:focus {
   border-color: var(--col-primary);
-  box-shadow: var(--glow-primary), inset 0 0 20px rgba(0, 229, 255, 0.05);
+  box-shadow: var(--glow-primary), inset 0 0 20px rgba(230, 140, 40, 0.05);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -358,18 +363,18 @@ button:active {
   letter-spacing: 4px;
   color: var(--col-bg);
   background: var(--col-primary);
-  box-shadow: var(--glow-primary), 0 4px 20px rgba(0, 229, 255, 0.3);
+  box-shadow: var(--glow-primary), 0 4px 20px rgba(230, 140, 40, 0.3);
 }
 
 .btn--primary:hover {
   transform: translateY(-3px);
-  box-shadow: var(--glow-primary), 0 8px 32px rgba(0, 229, 255, 0.45);
+  box-shadow: var(--glow-primary), 0 8px 32px rgba(230, 140, 40, 0.45);
 }
 
 .btn__glow {
   position: absolute;
   inset: -50%;
-  background: conic-gradient(transparent 0deg, rgba(0, 229, 255, 0.3) 90deg, transparent 180deg);
+  background: conic-gradient(transparent 0deg, rgba(230, 140, 40, 0.3) 90deg, transparent 180deg);
   animation: btn-spin 3s linear infinite;
   z-index: -1;
   will-change: transform;
@@ -408,14 +413,14 @@ button:active {
   letter-spacing: 2px;
   color: var(--col-text);
   background: var(--col-accent-dim);
-  border: 1px solid rgba(255, 45, 85, 0.4);
+  border: 1px solid rgba(255, 61, 46, 0.4);
   box-shadow: var(--glow-accent);
 }
 
 .btn--danger:hover {
   background: var(--col-accent);
   color: #fff;
-  box-shadow: var(--glow-accent), 0 8px 32px rgba(255, 45, 85, 0.4);
+  box-shadow: var(--glow-accent), 0 8px 32px rgba(255, 61, 46, 0.4);
 }
 
 .btn--menu {
@@ -424,15 +429,42 @@ button:active {
   font-family: var(--font-display);
   letter-spacing: 2px;
   color: var(--col-text);
-  background: rgba(0, 229, 255, 0.08);
-  border: 1px solid rgba(0, 229, 255, 0.35);
+  background: rgba(230, 140, 40, 0.08);
+  border: 1px solid rgba(230, 140, 40, 0.35);
   box-shadow: var(--glow-primary);
 }
 
 .btn--menu:hover {
   background: var(--col-primary);
   color: var(--col-bg);
-  box-shadow: var(--glow-primary), 0 8px 32px rgba(0, 229, 255, 0.3);
+  box-shadow: var(--glow-primary), 0 8px 32px rgba(230, 140, 40, 0.3);
+}
+
+/* FIX(menu1): trigger row for the leaderboard/upgrades modals — sits below DEPLOY,
+   never crowds the callsign input since it's a slim secondary row. */
+.menu-utility-row {
+  display: flex;
+  gap: var(--space-sm);
+  width: 100%;
+}
+
+.btn--menu-util {
+  flex: 1;
+  padding: calc(10px * var(--ui-scale)) calc(12px * var(--ui-scale));
+  font-size: calc(0.78rem * var(--ui-scale) * var(--text-scale));
+  font-family: var(--font-ui);
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--col-text-muted);
+  background: rgba(230, 140, 40, 0.06);
+  border: 1px solid var(--col-glass-border);
+  border-radius: var(--radius-sm);
+}
+
+.btn--menu-util:hover {
+  color: var(--col-text);
+  background: var(--col-primary-dim);
+  border-color: var(--col-primary);
 }
 
 .game-over-actions {
@@ -550,19 +582,19 @@ button:active {
   left: calc(44px * var(--ui-scale));
   width: calc(120px * var(--ui-scale));
   height: calc(120px * var(--ui-scale));
-  background: rgba(0, 229, 255, 0.06);
-  border: 2px solid rgba(0, 229, 255, 0.25);
+  background: rgba(230, 140, 40, 0.06);
+  border: 2px solid rgba(230, 140, 40, 0.25);
   border-radius: 50%;
   pointer-events: auto;
   touch-action: none;
-  box-shadow: 0 0 24px rgba(0, 229, 255, 0.1);
+  box-shadow: 0 0 24px rgba(230, 140, 40, 0.1);
   transition: border-color var(--dur-fast);
 }
 
 .joystick:active,
 .joystick--active {
-  border-color: rgba(0, 229, 255, 0.6);
-  box-shadow: 0 0 24px rgba(0, 229, 255, 0.35);
+  border-color: rgba(230, 140, 40, 0.6);
+  box-shadow: 0 0 24px rgba(230, 140, 40, 0.35);
 }
 
 .joystick__knob {
@@ -571,11 +603,11 @@ button:active {
   left: 50%;
   width: 48%;
   height: 48%;
-  background: radial-gradient(circle at 35% 35%, rgba(0, 229, 255, 0.9), rgba(0, 229, 255, 0.4));
+  background: radial-gradient(circle at 35% 35%, rgba(230, 140, 40, 0.9), rgba(230, 140, 40, 0.4));
   border-radius: 50%;
   transform: translate(-50%, -50%);
   pointer-events: none;
-  box-shadow: 0 0 12px rgba(0, 229, 255, 0.5);
+  box-shadow: 0 0 12px rgba(230, 140, 40, 0.5);
   transition: width var(--dur-fast), height var(--dur-fast);
   
   will-change: transform;
@@ -589,7 +621,7 @@ button:active {
   height: calc(90px * var(--ui-scale));
   border-radius: 50%;
   background: var(--col-accent-dim);
-  border: 2px solid rgba(255, 45, 85, 0.5);
+  border: 2px solid rgba(255, 61, 46, 0.5);
   color: var(--col-text);
   font-family: var(--font-display);
   font-size: calc(0.7rem * var(--ui-scale) * var(--text-scale));
@@ -602,7 +634,7 @@ button:active {
 
 .btn--shoot:active {
   background: var(--col-accent);
-  box-shadow: var(--glow-accent), 0 0 32px rgba(255, 45, 85, 0.7);
+  box-shadow: var(--glow-accent), 0 0 32px rgba(255, 61, 46, 0.7);
 }
 
 .btn--pause {
@@ -612,8 +644,8 @@ button:active {
   width: calc(52px * var(--ui-scale));
   height: calc(52px * var(--ui-scale));
   border-radius: 50%;
-  background: rgba(0, 229, 255, 0.08);
-  border: 2px solid rgba(0, 229, 255, 0.35);
+  background: rgba(230, 140, 40, 0.08);
+  border: 2px solid rgba(230, 140, 40, 0.35);
   color: var(--col-primary);
   font-size: calc(1.3rem * var(--ui-scale) * var(--text-scale));
   pointer-events: auto;
@@ -626,8 +658,8 @@ button:active {
 }
 
 .btn--pause:active {
-  background: rgba(0, 229, 255, 0.25);
-  box-shadow: var(--glow-primary), 0 0 32px rgba(0, 229, 255, 0.5);
+  background: rgba(230, 140, 40, 0.25);
+  box-shadow: var(--glow-primary), 0 0 32px rgba(230, 140, 40, 0.5);
 }
 
 .btn--quit {
@@ -637,8 +669,8 @@ button:active {
   width: calc(52px * var(--ui-scale));
   height: calc(52px * var(--ui-scale));
   border-radius: 50%;
-  background: rgba(255, 45, 85, 0.08);
-  border: 2px solid rgba(255, 45, 85, 0.35);
+  background: rgba(255, 61, 46, 0.08);
+  border: 2px solid rgba(255, 61, 46, 0.35);
   color: var(--col-accent);
   font-size: calc(1.2rem * var(--ui-scale) * var(--text-scale));
   pointer-events: auto;
@@ -651,21 +683,21 @@ button:active {
 }
 
 .btn--quit:active {
-  background: rgba(255, 45, 85, 0.3);
+  background: rgba(255, 61, 46, 0.3);
 }
 
 @media (hover: hover) and (pointer: fine) {
   .btn--shoot:hover {
-    background: rgba(255, 45, 85, 0.22);
-    box-shadow: var(--glow-accent), 0 0 28px rgba(255, 45, 85, 0.35);
+    background: rgba(255, 61, 46, 0.22);
+    box-shadow: var(--glow-accent), 0 0 28px rgba(255, 61, 46, 0.35);
   }
 
   .btn--pause:hover {
-    background: rgba(0, 229, 255, 0.18);
+    background: rgba(230, 140, 40, 0.18);
   }
 
   .btn--quit:hover {
-    background: rgba(255, 45, 85, 0.18);
+    background: rgba(255, 61, 46, 0.18);
   }
 }
 
@@ -785,7 +817,7 @@ button:active {
   align-items: center;
   justify-content: center;
   gap: var(--space-md);
-  background: rgba(5, 8, 22, 0.97);
+  background: rgba(20, 14, 9, 0.97);
   text-align: center;
   padding: var(--space-lg);
 }
@@ -832,28 +864,13 @@ button:active {
   }
 }
 
-/* ── Coin Shop ─────────────────────────────────────────────────────────── */
+/* ── Coin Shop (lives inside #upgradesScreen modal — see SCREENS section) ── */
 .coin-shop {
-  position: fixed;
-  bottom: 1.5rem;
-  right: 1.5rem;
-  width: min(340px, 92vw);
-  background: rgba(5, 8, 22, 0.92);
-  border: 1px solid rgba(0, 229, 255, 0.28);
-  border-radius: 12px;
-  padding: 1rem 1.2rem;
-  z-index: 120;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 0 28px rgba(0, 229, 255, 0.12);
-}
-
-.coin-shop--docked {
   position: static;
-  width: 100%;
-  max-height: 38vh;
+  width: min(360px, 84vw);
+  max-height: 60vh;
   overflow-y: auto;
-  margin-top: var(--space-md);
-  box-shadow: none;
+  padding-top: var(--space-sm);
 }
 
 .shop-header {
@@ -861,7 +878,7 @@ button:active {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 0.75rem;
-  border-bottom: 1px solid rgba(0, 229, 255, 0.18);
+  border-bottom: 1px solid rgba(230, 140, 40, 0.18);
   padding-bottom: 0.5rem;
 }
 
@@ -908,7 +925,7 @@ button:active {
 .shop-desc {
   font-family: var(--font-ui);
   font-size: calc(0.72rem * var(--text-scale));
-  color: rgba(232,240,254,0.45);
+  color: rgba(241,232,218,0.45);
 }
 
 .btn--shop {
@@ -923,10 +940,10 @@ button:active {
   transition: opacity 0.15s;
 }
 
-.btn--shop-buy  { background: rgba(0,229,255,0.15); color: var(--col-primary); border: 1px solid rgba(0,229,255,0.5); }
-.btn--shop-buy:hover { background: rgba(0,229,255,0.28); }
-.btn--shop-poor { background: rgba(255,255,255,0.05); color: rgba(232,240,254,0.3); border: 1px solid rgba(255,255,255,0.1); cursor: not-allowed; }
-.btn--shop-maxed { background: rgba(46,204,113,0.12); color: var(--col-success); border: 1px solid rgba(46,204,113,0.35); cursor: default; }
+.btn--shop-buy  { background: rgba(230,140,40,0.15); color: var(--col-primary); border: 1px solid rgba(230,140,40,0.5); }
+.btn--shop-buy:hover { background: rgba(230,140,40,0.28); }
+.btn--shop-poor { background: rgba(255,255,255,0.05); color: rgba(241,232,218,0.3); border: 1px solid rgba(255,255,255,0.1); cursor: not-allowed; }
+.btn--shop-maxed { background: rgba(163,181,101,0.12); color: var(--col-success); border: 1px solid rgba(163,181,101,0.35); cursor: default; }
 
 .game-over-coins {
   font-family: var(--font-ui);
@@ -948,8 +965,8 @@ button:active {
   width: calc(40px * var(--ui-scale));
   height: calc(40px * var(--ui-scale));
   border-radius: 50%;
-  background: rgba(0, 229, 255, 0.08);
-  border: 1px solid rgba(0, 229, 255, 0.35);
+  background: rgba(230, 140, 40, 0.08);
+  border: 1px solid rgba(230, 140, 40, 0.35);
   color: var(--col-primary);
   font-size: calc(1.1rem * var(--ui-scale) * var(--text-scale));
   display: flex;
@@ -963,7 +980,7 @@ button:active {
 }
 
 .btn--mute:hover {
-  background: rgba(0, 229, 255, 0.22);
+  background: rgba(230, 140, 40, 0.22);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -992,8 +1009,8 @@ button:active {
   width: calc(30px * var(--ui-scale));
   height: calc(30px * var(--ui-scale));
   border-radius: 50%;
-  background: rgba(255, 45, 85, 0.1);
-  border: 1px solid rgba(255, 45, 85, 0.4);
+  background: rgba(255, 61, 46, 0.1);
+  border: 1px solid rgba(255, 61, 46, 0.4);
   color: var(--col-accent);
   font-size: calc(0.85rem * var(--ui-scale) * var(--text-scale));
   display: flex;
@@ -1060,8 +1077,8 @@ button:active {
   font-family: var(--font-display);
   font-size: calc(0.68rem * var(--text-scale));
   color: var(--col-primary);
-  background: rgba(0, 229, 255, 0.1);
-  border: 1px solid rgba(0, 229, 255, 0.35);
+  background: rgba(230, 140, 40, 0.1);
+  border: 1px solid rgba(230, 140, 40, 0.35);
   border-radius: var(--radius-sm);
   padding: 1px 6px;
   margin-right: 2px;
@@ -1098,8 +1115,8 @@ button:active {
   padding: 6px 4px;
   font-size: calc(0.75rem * var(--text-scale));
   font-family: var(--font-display);
-  border: 1px solid rgba(0, 229, 255, 0.35);
-  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(230, 140, 40, 0.35);
+  background: rgba(230, 140, 40, 0.06);
   color: var(--col-text-muted);
   border-radius: var(--radius-sm);
   transition: background var(--dur-fast), color var(--dur-fast);
@@ -1133,8 +1150,8 @@ button:active {
   width: calc(72px * var(--ui-scale));
   height: calc(52px * var(--ui-scale));
   border-radius: var(--radius-sm);
-  background: rgba(0, 229, 255, 0.08);
-  border: 1px solid rgba(0, 229, 255, 0.35);
+  background: rgba(230, 140, 40, 0.08);
+  border: 1px solid rgba(230, 140, 40, 0.35);
   color: var(--col-primary);
   font-family: var(--font-display);
   font-size: calc(0.65rem * var(--text-scale));
@@ -1149,7 +1166,7 @@ button:active {
 }
 
 .btn--weapon:active {
-  background: rgba(0, 229, 255, 0.28);
+  background: rgba(230, 140, 40, 0.28);
 }
 
 .btn--weapon.is-disabled,
@@ -1171,8 +1188,8 @@ button:active {
   width: 84px;
   height: 44px;
   border-radius: var(--radius-sm);
-  background: rgba(0, 229, 255, 0.08);
-  border: 1px solid rgba(0, 229, 255, 0.35);
+  background: rgba(230, 140, 40, 0.08);
+  border: 1px solid rgba(230, 140, 40, 0.35);
   color: var(--col-primary);
   font-family: var(--font-display);
   font-size: calc(0.7rem * var(--text-scale));
@@ -1192,12 +1209,12 @@ button:active {
 }
 
 .btn--weapon-pc:hover {
-  background: rgba(0, 229, 255, 0.2);
-  box-shadow: var(--glow-primary), 0 0 24px rgba(0, 229, 255, 0.35);
+  background: rgba(230, 140, 40, 0.2);
+  box-shadow: var(--glow-primary), 0 0 24px rgba(230, 140, 40, 0.35);
 }
 
 .btn--weapon-pc:active {
-  background: rgba(0, 229, 255, 0.32);
+  background: rgba(230, 140, 40, 0.32);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -1205,12 +1222,12 @@ button:active {
    ───────────────────────────────────────────────────────────── */
 .run-summary {
   width: min(320px, 90vw);
-  background: rgba(5, 8, 22, 0.88);
-  border: 1px solid rgba(0, 229, 255, 0.28);
+  background: rgba(20, 14, 9, 0.88);
+  border: 1px solid rgba(230, 140, 40, 0.28);
   border-radius: 10px;
   padding: 0.75rem 1rem;
   backdrop-filter: blur(8px);
-  box-shadow: 0 0 20px rgba(0, 229, 255, 0.1);
+  box-shadow: 0 0 20px rgba(230, 140, 40, 0.1);
   margin-bottom: 0.75rem;
 }
 
@@ -1230,7 +1247,7 @@ button:active {
 .run-summary__label {
   font-size: calc(0.78rem * var(--text-scale));
   font-weight: 700;
-  color: rgba(232, 240, 254, 0.5);
+  color: rgba(241, 232, 218, 0.5);
   letter-spacing: 2px;
   text-transform: uppercase;
 }
@@ -1250,8 +1267,8 @@ button:active {
   left: 50%;
   bottom: 48px;
   transform: translate(-50%, 12px);
-  background: rgba(5, 8, 22, 0.92);
-  border: 1px solid rgba(0, 229, 255, 0.35);
+  background: rgba(20, 14, 9, 0.92);
+  border: 1px solid rgba(230, 140, 40, 0.35);
   border-radius: 10px;
   padding: 0.65rem 1.1rem;
   font-family: var(--font-ui);
@@ -1259,7 +1276,7 @@ button:active {
   font-size: calc(0.95rem * var(--text-scale));
   letter-spacing: 0.03em;
   color: #feca57;
-  box-shadow: 0 0 20px rgba(0, 229, 255, 0.12);
+  box-shadow: 0 0 20px rgba(230, 140, 40, 0.12);
   backdrop-filter: blur(8px);
   opacity: 0;
   pointer-events: none;
@@ -1333,7 +1350,7 @@ button:active {
   font-size: calc(0.78rem * var(--ui-scale) * var(--text-scale));
   font-weight: 400;
   letter-spacing: 0.2px;
-  color: rgba(232, 240, 254, 0.55);
+  color: rgba(241, 232, 218, 0.55);
 }
 
 .btn--ascension:hover .upgrade-desc {
@@ -1379,14 +1396,14 @@ button:active {
   width: calc(8px * var(--ui-scale));
   height: calc(8px * var(--ui-scale));
   border-radius: 50%;
-  background: rgba(232, 240, 254, 0.12);
-  border: 1px solid rgba(232, 240, 254, 0.15);
+  background: rgba(241, 232, 218, 0.12);
+  border: 1px solid rgba(241, 232, 218, 0.15);
 }
 
 .daily-pip--played {
   background: var(--col-primary);
   border-color: var(--col-primary);
-  box-shadow: 0 0 6px rgba(0, 229, 255, 0.6);
+  box-shadow: 0 0 6px rgba(230, 140, 40, 0.6);
 }
 
 .daily-streak {
