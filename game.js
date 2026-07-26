@@ -97,7 +97,8 @@ const CONFIG = Object.freeze({
     rage:         "\u2739",
   },
 
-  HUD_FONT:             "'Rajdhani', sans-serif",
+  HUD_FONT:             "-apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+  HUD_FONT_DISPLAY:     "-apple-system, 'Segoe UI Semibold', 'Segoe UI', 'Roboto Condensed', 'Arial Narrow', sans-serif",
   HUD_COLOR_MAIN:       "#e8f0fe",
   HUD_COLOR_HP_BG:      "rgba(255, 45, 85, 0.35)",
   HUD_COLOR_HP_FG:      "#2ecc71",
@@ -2300,19 +2301,20 @@ class UIManager {
     }
 
     this._el = {
-      startScreen:     document.getElementById("startScreen"),
-      levelUp:         document.getElementById("levelUpScreen"),
-      ascension:       document.getElementById("ascensionScreen"),
-      gameOverActions: document.getElementById("gameOverActions"),
-      mobileUI:        document.getElementById("mobileControls"),
-      leaderboard:     document.getElementById("localLeaderboard"),
-      coinShop:        document.getElementById("coinShop"),
-      instructions:    document.getElementById("instructionsScreen"),
-      weaponBtnPC:     document.getElementById("weaponBtnPC"),
-      quitBtn:         document.getElementById("quitBtn"),
+      startScreen:      document.getElementById("startScreen"),
+      levelUp:          document.getElementById("levelUpScreen"),
+      ascension:        document.getElementById("ascensionScreen"),
+      gameOverActions:  document.getElementById("gameOverActions"),
+      mobileUI:         document.getElementById("mobileControls"),
+      leaderboard:      document.getElementById("localLeaderboard"),
+      coinShop:         document.getElementById("coinShop"),
+      instructions:     document.getElementById("instructionsScreen"),
+      accessibility:    document.getElementById("accessibilityScreen"),
+      leaderboardScreen: document.getElementById("leaderboardScreen"),
+      upgradesScreen:   document.getElementById("upgradesScreen"),
+      weaponBtnPC:      document.getElementById("weaponBtnPC"),
+      quitBtn:          document.getElementById("quitBtn"),
     };
-
-    this._coinShopHomeParent = this._el.coinShop?.parentElement || null;
 
     this._pendingAscension = null;
     this.game.events.on("player:levelup", ({ ascension }) => {
@@ -2325,9 +2327,7 @@ class UIManager {
     this._renderLeaderboard();
     this._renderCoinShop();
     this._renderDailyHistory();
-    this._layoutCoinShop();
     this._applyTextScale();
-    window.addEventListener("resize", () => this._layoutCoinShop());
 
     const dailyDateLabel = document.getElementById("dailyDateLabel");
     if (dailyDateLabel) dailyDateLabel.textContent = `(${Utils.todayUTCString()})`;
@@ -2337,9 +2337,12 @@ class UIManager {
     const el     = this._el;
     const mobile = this._shouldShowMobileUI();
 
+    // FIX(menu1): any state transition closes the leaderboard/upgrades/how-to-play/
+    // accessibility modals so they never linger over — or stack with — the next screen.
+    this._closeAllOverlays();
+
     const v = {
       startScreen:     false,
-      coinShop:        false,
       weaponBtnPCShown: false,
       weaponBtnPCEnabled: true,
       quitBtn:         false,
@@ -2354,7 +2357,6 @@ class UIManager {
     switch (state) {
       case GameState.MENU:
         v.startScreen = true;
-        v.coinShop    = true;
         break;
 
       case GameState.PLAYING:
@@ -2392,7 +2394,6 @@ class UIManager {
     }
 
     el.startScreen?.classList.toggle("hidden", !v.startScreen);
-    el.coinShop?.classList.toggle("hidden", !v.coinShop);
     el.gameOverActions?.classList.toggle("hidden", !v.gameOverActions);
     el.levelUp?.classList.toggle("hidden", !v.levelUp);
     el.ascension?.classList.toggle("hidden", !v.ascension);
@@ -2409,27 +2410,18 @@ class UIManager {
     el.mobileUI?.classList.toggle("paused", v.mobileDimmed);
     el.mobileUI?.classList.toggle("game-over", v.mobileGameOver);
 
-    if (v.startScreen) this._layoutCoinShop();
-
     this._currentScreenState = state;
   }
   _applyTextScale() {
     document.documentElement.style.setProperty("--text-scale", this.game.accessibility.textScale);
   }
 
-  _layoutCoinShop() {
-    const shop = this._el.coinShop;
-    if (!shop) return;
-    const inner = this._el.startScreen?.querySelector(".screen__inner");
-    const small = window.innerWidth < 640 || window.innerHeight < 560;
-
-    if (small && inner) {
-      if (shop.parentElement !== inner) inner.appendChild(shop);
-      shop.classList.add("coin-shop--docked");
-    } else if (this._coinShopHomeParent) {
-      if (shop.parentElement !== this._coinShopHomeParent) this._coinShopHomeParent.appendChild(shop);
-      shop.classList.remove("coin-shop--docked");
-    }
+  _closeAllOverlays() {
+    const el = this._el;
+    el.instructions?.classList.add("hidden");
+    el.accessibility?.classList.add("hidden");
+    el.leaderboardScreen?.classList.add("hidden");
+    el.upgradesScreen?.classList.add("hidden");
   }
 
   _bindUI() {
@@ -2450,6 +2442,7 @@ class UIManager {
 
     const openInstructions = () => {
       if (!instrPanel) return;
+      this._closeAllOverlays();
       const mobile = this._shouldShowMobileUI();
       instrDesktop?.classList.toggle("hidden", mobile);
       instrMobile?.classList.toggle("hidden", !mobile);
@@ -2501,6 +2494,7 @@ class UIManager {
     };
 
     const openA11y = () => {
+      this._closeAllOverlays();
       refreshA11yControls();
       a11yPanel?.classList.remove("hidden");
       this._focusFirstIn(a11yPanel);
@@ -2519,6 +2513,68 @@ class UIManager {
       if (!a11yPanel || a11yPanel.classList.contains("hidden")) return;
       if (e.key === "Escape") closeA11y();
       else this._trapFocus(e, a11yPanel);
+    });
+
+    // ═══════════════════════════════════════════════════════════════════
+    // FIX(menu1): LEADERBOARD / UPGRADES — button-gated modals, same pattern
+    // as the how-to-play / accessibility panels above.
+    // ═══════════════════════════════════════════════════════════════════
+    const leaderboardBtn   = document.getElementById("leaderboardBtn");
+    const leaderboardPanel = this._el.leaderboardScreen;
+    const leaderboardClose = document.getElementById("leaderboardCloseBtn");
+
+    const openLeaderboard = () => {
+      if (!leaderboardPanel) return;
+      this._closeAllOverlays();
+      this._renderLeaderboard();
+      leaderboardPanel.classList.remove("hidden");
+      this._focusFirstIn(leaderboardPanel);
+    };
+    const closeLeaderboard = () => {
+      leaderboardPanel?.classList.add("hidden");
+      leaderboardBtn?.focus();
+    };
+
+    if (leaderboardBtn)   leaderboardBtn.addEventListener("click", openLeaderboard);
+    if (leaderboardClose) leaderboardClose.addEventListener("click", closeLeaderboard);
+    if (leaderboardPanel) {
+      leaderboardPanel.addEventListener("click", e => {
+        if (e.target === leaderboardPanel) closeLeaderboard();
+      });
+    }
+    window.addEventListener("keydown", e => {
+      if (!leaderboardPanel || leaderboardPanel.classList.contains("hidden")) return;
+      if (e.key === "Escape") closeLeaderboard();
+      else this._trapFocus(e, leaderboardPanel);
+    });
+
+    const upgradesBtn   = document.getElementById("upgradesBtn");
+    const upgradesPanel = this._el.upgradesScreen;
+    const upgradesClose = document.getElementById("upgradesCloseBtn");
+
+    const openUpgrades = () => {
+      if (!upgradesPanel) return;
+      this._closeAllOverlays();
+      this._renderCoinShop();
+      upgradesPanel.classList.remove("hidden");
+      this._focusFirstIn(upgradesPanel);
+    };
+    const closeUpgrades = () => {
+      upgradesPanel?.classList.add("hidden");
+      upgradesBtn?.focus();
+    };
+
+    if (upgradesBtn)   upgradesBtn.addEventListener("click", openUpgrades);
+    if (upgradesClose) upgradesClose.addEventListener("click", closeUpgrades);
+    if (upgradesPanel) {
+      upgradesPanel.addEventListener("click", e => {
+        if (e.target === upgradesPanel) closeUpgrades();
+      });
+    }
+    window.addEventListener("keydown", e => {
+      if (!upgradesPanel || upgradesPanel.classList.contains("hidden")) return;
+      if (e.key === "Escape") closeUpgrades();
+      else this._trapFocus(e, upgradesPanel);
     });
 
     if (shakeSlider) {
@@ -4246,17 +4302,17 @@ class Game {
       ctx.save();
       ctx.textAlign    = "center";
       ctx.textBaseline = "middle";
-      ctx.font         = `900 52px 'Orbitron', monospace`;
+      ctx.font         = `900 52px ${CONFIG.HUD_FONT_DISPLAY}`;
       ctx.fillStyle    = "#00e5ff";
       ctx.shadowColor  = "#00e5ff";
       ctx.shadowBlur   = 20;
       ctx.fillText(`WAVE ${this.wave + 1} INCOMING`, this.width / 2, this.height / 2 - 40);
-      ctx.font         = `700 28px 'Rajdhani', sans-serif`;
+      ctx.font         = `700 28px ${CONFIG.HUD_FONT}`;
       ctx.fillStyle    = "rgba(255,255,255,0.7)";
       ctx.shadowBlur   = 0;
       ctx.fillText(String(countdown), this.width / 2, this.height / 2 + 20);
       if (this._bossWarning) {
-        ctx.font        = `700 22px 'Rajdhani', sans-serif`;
+        ctx.font        = `700 22px ${CONFIG.HUD_FONT}`;
         ctx.fillStyle   = "#ff2d55";
         ctx.shadowColor = "#ff2d55";
         ctx.shadowBlur  = 12;
@@ -4270,7 +4326,7 @@ class Game {
       ctx.textAlign    = "center";
       ctx.textBaseline = "middle";
 
-      ctx.font = "bold 17px 'Rajdhani', sans-serif";
+      ctx.font = `bold 17px ${CONFIG.HUD_FONT}`;
       ctx.fillStyle = "#ff2d55";
       for (const dn of this.damageNumbers) {
         if (dn.life > 0 && dn.isBoss) dn.draw(ctx);
@@ -4281,7 +4337,7 @@ class Game {
         if (dn.life > 0 && !dn.isBoss && dn.isCrit) dn.draw(ctx);
       }
 
-      ctx.font = "bold 14px 'Rajdhani', sans-serif";
+      ctx.font = `bold 14px ${CONFIG.HUD_FONT}`;
       ctx.fillStyle = "#ffffff";
       for (const dn of this.damageNumbers) {
         if (dn.life > 0 && !dn.isBoss && !dn.isCrit) dn.draw(ctx);
@@ -4354,7 +4410,7 @@ class Game {
     ];
 
     ctx.save();
-    ctx.font = "600 13px 'Rajdhani', sans-serif";
+    ctx.font = `600 13px ${CONFIG.HUD_FONT}`;
     const lineH  = 16;
     const padX   = 10;
     const padY   = 8;
@@ -4976,14 +5032,14 @@ function showFatalErrorOverlay(err) {
     "display:flex", "flex-direction:column",
     "align-items:center", "justify-content:center",
     "gap:16px", "padding:24px", "text-align:center",
-    "background:rgba(5,8,16,0.92)", "color:#e8f0fe",
-    "font-family:'Rajdhani',sans-serif", "font-size:20px",
+    "background:rgba(20,14,9,0.94)", "color:#f1e8da",
+    `font-family:${CONFIG.HUD_FONT}`, "font-size:20px",
   ].join(";");
   overlay.innerHTML = `
     <div>Something went wrong — reload to keep playing.</div>
     <button type="button" style="
       font:inherit; font-weight:700; padding:10px 24px; cursor:pointer;
-      background:#00e5ff; color:#050810; border:none; border-radius:6px;
+      background:#e6862c; color:#0d0906; border:none; border-radius:6px;
     ">Reload</button>`;
   overlay.querySelector("button").addEventListener("click", () => window.location.reload());
   document.body.appendChild(overlay);
