@@ -81,12 +81,12 @@ const CONFIG = Object.freeze({
 
   POWERUP_TYPES:  ["health", "xp", "shield", "triple_shot", "speed_boost", "rage"],
   POWERUP_COLORS: {
-    health:       "#ff6b81",
+    health:       "#CD1C18",
     xp:           "#feca57",
-    shield:       "#48dbfb",
-    triple_shot:  "#ff9f43",
-    speed_boost:  "#1dd1a1",
-    rage:         "#ff4757",
+    shield:       "#9400D3",
+    triple_shot:  "#FFA896",
+    speed_boost:  "#ED80E9",
+    rage:         "#9B1313",
   },
   POWERUP_GLYPHS: {
     health:       "+",
@@ -99,17 +99,17 @@ const CONFIG = Object.freeze({
 
   HUD_FONT:             "-apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
   HUD_FONT_DISPLAY:     "-apple-system, 'Segoe UI Semibold', 'Segoe UI', 'Roboto Condensed', 'Arial Narrow', sans-serif",
-  HUD_COLOR_MAIN:       "#e8f0fe",
-  HUD_COLOR_HP_BG:      "rgba(255, 45, 85, 0.35)",
-  HUD_COLOR_HP_FG:      "#2ecc71",
-  HUD_COLOR_XP_BG:      "rgba(0, 229, 255, 0.2)",
-  HUD_COLOR_XP_FG:      "#00e5ff",
-  WALL_COLOR:           "#1a2033",
-  WALL_HP_COLOR:        "#e74c3c",
-  WALL_HP_GOOD_COLOR:   "#2ecc71",
-  PACE_AHEAD_COLOR:  "#2ecc71",
-  PACE_BEHIND_COLOR: "#ff6b6b",
-  PACE_NEW_COLOR:    "#f1c40f",
+  HUD_COLOR_MAIN:       "#D3D3FF",
+  HUD_COLOR_HP_BG:      "rgba(42, 10, 28, 0.55)",
+  HUD_COLOR_HP_FG:      "#CD1C18",
+  HUD_COLOR_XP_BG:      "rgba(42, 10, 28, 0.45)",
+  HUD_COLOR_XP_FG:      "#9400D3",
+  WALL_COLOR:           "#2A0A1C",
+  WALL_HP_COLOR:        "#2A0A1C",
+  WALL_HP_GOOD_COLOR:   "#CD1C18",
+  PACE_AHEAD_COLOR:  "#ED80E9",
+  PACE_BEHIND_COLOR: "#FFA896",
+  PACE_NEW_COLOR:    "#ED80E9",
 
   COLORBLIND_OVERRIDES: {
     HUD_COLOR_HP_FG:    "#0072B2", // was #2ecc71 green -> safe blue, vs red bg
@@ -141,35 +141,43 @@ const ENEMY_TABLE = Object.freeze([
 ]);
 
 // ── ENEMY_TYPES ─────────────────────────────────────────────────
+// FIX(theme2): standard enemies recolored into the --primary/--primary-deep/
+// --warm-glow family (rusher and spread intentionally share --primary-deep --
+// their shapes, triangle vs pentagon, already disambiguate them). "tank" is
+// the roster's elite/toughest unit and gets --accent-violet, matching the
+// boss, so violet reads consistently as "serious threat" across the game.
+// exploder is a 50/50 blend of --primary + --warm-glow (a distinct "volatile"
+// tone) since its shape (square) duplicates "normal"'s and needed its own hue.
+// Colorblind-safe colors (COLORBLIND_ENEMY_COLORS above) are untouched.
 const ENEMY_TYPES = Object.freeze({
   normal: {
-    color: "#2ecc71", baseSize: 20, speed: CONFIG.BASE_ENEMY_SPEED,
+    color: "#CD1C18", baseSize: 20, speed: CONFIG.BASE_ENEMY_SPEED,
     hpMul: 1.0, shootDelay: 2.0, sides: 4, rotSpeed: 1.2,
   },
   rusher: {
-    color: "#e74c3c", baseSize: 14, speed: 240,
+    color: "#9B1313", baseSize: 14, speed: 240,
     hpMul: 0.4, shootDelay: 99, sides: 3, rotSpeed: 4.0,
     meleeCooldown: 0.4, meleeDamageMult: 1.0,
   },
   fast: {
-    color: "#f1c40f", baseSize: 16, speed: 185,
+    color: "#FFA896", baseSize: 16, speed: 185,
     hpMul: 0.6, shootDelay: 1.5, sides: 3, rotSpeed: 4.0,
   },
   ranged: {
-    color: "#00e5ff", baseSize: 18, speed: 60,
+    color: "#ED80E9", baseSize: 18, speed: 60,
     hpMul: 0.8, shootDelay: 1.2, sides: 8, rotSpeed: 1.2,
     preferredDistMul: 260,
   },
   spread: {
-    color: "#9b59b6", baseSize: 20, speed: 70,
+    color: "#9B1313", baseSize: 20, speed: 70,
     hpMul: 1.0, shootDelay: 2.5, sides: 5, rotSpeed: 1.2,
   },
   exploder: {
-    color: "#e67e22", baseSize: 22, speed: 105,
+    color: "#E66257", baseSize: 22, speed: 105,
     hpMul: 1.0, shootDelay: 4.0, sides: 4, rotSpeed: 1.2,
   },
   tank: {
-    color: "#3498db", baseSize: 30, speed: 40,
+    color: "#9400D3", baseSize: 30, speed: 40,
     hpMul: 2.5, shootDelay: 99, sides: 6, rotSpeed: 0.3,
     meleeCooldown: 0.9, meleeDamageMult: 2.5,
   },
@@ -590,7 +598,7 @@ const BackgroundLayer = {
     const oc   = document.createElement("canvas");
     oc.width = oc.height = size;
     const octx = oc.getContext("2d");
-    octx.strokeStyle = "rgba(0,229,255,0.05)";
+    octx.strokeStyle = "rgba(148,0,211,0.06)";
     octx.lineWidth   = 1;
     octx.beginPath();
     octx.moveTo(0.5, 0);   octx.lineTo(0.5, size);
@@ -626,8 +634,8 @@ const BackgroundLayer = {
     ctx.restore();
 
     const color = bossActive
-      ? "rgba(255,45,85,0.22)"
-      : `rgba(0,10,20,${(0.35 + waveLevel * 0.25).toFixed(3)})`;
+      ? "rgba(148,0,211,0.25)"
+      : `rgba(42,10,28,${(0.35 + waveLevel * 0.25).toFixed(3)})`;
     const key = `${width}x${height}:${color}`;
     if (!this._vignette || this._vignette.key !== key) this._buildVignette(width, height, color);
     ctx.drawImage(this._vignette.canvas, 0, 0);
@@ -1407,7 +1415,7 @@ class Player {
         const isCrit = Math.random() < this.critChance;
         const isRage = this.buffs.rage > 0;
         const dmg    = ((isRage || isCrit) ? this.damage * T.critRageDamageMult : this.damage) * T.damageMult;
-        const color  = isCrit ? "#f1c40f" : isRage ? "#ff4757" : "#ff9f43";
+        const color  = isCrit ? "#ED80E9" : isRage ? "#D3D3FF" : "#FFA896";
         const velMul = T.velocitySpreadMin + Math.random() * T.velocitySpreadRange;
         const b      = this.game.bulletPool.get();
         b.init(this.x, this.y,
@@ -1430,7 +1438,7 @@ class Player {
       if (synergy.overchargedBeam) {
         dmg *= 1 + (this.upgrades.fireRate - Player.SYNERGY_TIER + 1) * T.overchargedBeamBonusPerTier;
       }
-      const color  = "#00e5ff";
+      const color  = "#FFA896";
       const b      = this.game.bulletPool.get();
       const maxPierce = (synergy.piercingOverload && isCrit) ? T.maxPiercePiercingOverload : T.maxPierceBase;
       b.init(this.x, this.y,
@@ -1453,7 +1461,7 @@ class Player {
       const isCrit = Math.random() < this.critChance;
       const isRage = this.buffs.rage > 0;
       const dmg    = (isRage || isCrit) ? this.damage * T.critRageDamageMult : this.damage;
-      const color  = isCrit ? "#f1c40f" : isRage ? "#ff4757" : "#e74c3c";
+      const color  = isCrit ? "#ED80E9" : isRage ? "#D3D3FF" : "#FFA896";
       const size   = (isCrit ? T.bulletSizeCrit : T.bulletSizeNormal) * this.game.uiScale;
 
       const b = this.game.bulletPool.get();
@@ -1510,12 +1518,12 @@ class Player {
     const s = this.size;
 
     if (this.buffs.shield > 0) {
-      ctx.strokeStyle = "rgba(72,219,251,0.22)";
+      ctx.strokeStyle = "rgba(148,0,211,0.22)";
       ctx.lineWidth   = 8;
       ctx.beginPath();
       ctx.arc(0, 0, s + 16, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.strokeStyle = "rgba(72,219,251,0.72)";
+      ctx.strokeStyle = "rgba(148,0,211,0.72)";
       ctx.lineWidth   = 2;
       ctx.beginPath();
       ctx.arc(0, 0, s + 12, 0, Math.PI * 2);
@@ -1529,9 +1537,9 @@ class Player {
 
     const flicker   = 0.8 + Math.sin(this.game.gameTime * 40) * 0.2;
     const flameGrad = ctx.createLinearGradient(-s * 0.25, 0, -s * 1.1 * flicker, 0);
-    flameGrad.addColorStop(0, `rgba(255,200,80,${0.95 * flicker})`);
-    flameGrad.addColorStop(0.5, `rgba(255,120,20,${0.6 * flicker})`);
-    flameGrad.addColorStop(1, "rgba(255,60,0,0)");
+    flameGrad.addColorStop(0, `rgba(255,168,150,${0.95 * flicker})`);
+    flameGrad.addColorStop(0.5, `rgba(205,28,24,${0.6 * flicker})`);
+    flameGrad.addColorStop(1, "rgba(155,19,19,0)");
     ctx.fillStyle = flameGrad;
     ctx.beginPath();
     ctx.moveTo(-s * 0.22,  s * 0.18);
@@ -1554,11 +1562,11 @@ class Player {
     ctx.fillStyle = this.color;
     ctx.fill();
 
-    ctx.strokeStyle = "rgba(5,8,16,0.8)";
+    ctx.strokeStyle = "rgba(20,4,13,0.8)";
     ctx.lineWidth   = 1.5;
     ctx.stroke();
 
-    ctx.fillStyle = "rgba(0,229,255,0.55)";
+    ctx.fillStyle = "rgba(211,211,255,0.55)";
     ctx.beginPath();
     ctx.ellipse(s * 0.45, 0, s * 0.18, s * 0.09, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -1750,7 +1758,7 @@ class Enemy {
     }
     ctx.closePath();
 
-    ctx.fillStyle   = "rgba(5,8,16,0.7)";
+    ctx.fillStyle   = "rgba(20,4,13,0.7)";
     ctx.fill();
     const shapeOnlyID = this.game.accessibility.shapeOnlyID;
     ctx.strokeStyle = this.color;
@@ -1783,10 +1791,11 @@ class Enemy {
       const frac = Math.max(0, this.hp / this.maxHp);
       ctx.save();
       ctx.globalAlpha = 0.85;
-      ctx.fillStyle   = "rgba(0,0,0,0.6)";
+      ctx.fillStyle   = "rgba(42,10,28,0.6)"; // FIX(theme2): track -> --panel-surface
       ctx.fillRect(barX, barY, barW, barH);
-      const hue     = Math.round(frac * 120);
-      ctx.fillStyle = `hsl(${hue},100%,50%)`;
+      // FIX(theme2): was hsl(120*frac) green->red hue ramp; themed bars stay in the
+      // blood-red family and use brightness instead of hue to read "low health".
+      ctx.fillStyle = frac < 0.3 ? "#FFA896" /* --warm-glow: critical flash */ : "#CD1C18" /* --primary */;
       ctx.fillRect(barX, barY, barW * frac, barH);
       ctx.restore();
     }
@@ -1804,7 +1813,7 @@ class Boss {
     this.prevY  = this.y;
     this.alive  = true;
     this.size   = 52 * game.uiScale;
-    this.color  = "#ff2d55";
+    this.color  = "#9400D3";
     this.speed  = 80;
 
     const wf    = Math.max(1, Math.log(game.wave + 1));
@@ -1871,7 +1880,7 @@ class Boss {
             const b   = this.game.bulletPool.get();
             b.init(this.x, this.y,
               Math.cos(ang) * spd, Math.sin(ang) * spd,
-              6 * this.game.uiScale, "#ff2d55", this.damage, true);
+              6 * this.game.uiScale, "#9400D3", this.damage, true);
             this.game.bullets.push(b);
             this.game.trailMgr.register(b, b.color);
           }
@@ -1896,7 +1905,7 @@ class Boss {
             const b   = this.game.bulletPool.get();
             b.init(this.x, this.y,
               Math.cos(ang) * 280, Math.sin(ang) * 280,
-              6 * this.game.uiScale, "#ff9f43", this.damage * 0.7, true);
+              6 * this.game.uiScale, "#FFA896", this.damage * 0.7, true);
             this.game.bullets.push(b);
             this.game.trailMgr.register(b, b.color);
           }
@@ -1985,7 +1994,7 @@ class Boss {
     const s  = this.size;
     const t  = this.game.gameTime;
 
-    const drawColor = (this._phase === "telegraph" && this._flashToggle) ? "#f1c40f" : this.color;
+    const drawColor = (this._phase === "telegraph" && this._flashToggle) ? "#ED80E9" : this.color;
 
     const glow = GlowCache.get(drawColor, s, s * 1.8);
     ctx.drawImage(glow.canvas, rx - glow.half, ry - glow.half);
@@ -2005,7 +2014,7 @@ class Boss {
               : ctx.lineTo(Math.cos(ang) * r, Math.sin(ang) * r);
     }
     ctx.closePath();
-    ctx.fillStyle   = "rgba(5,8,16,0.82)";
+    ctx.fillStyle   = "rgba(20,4,13,0.82)";
     ctx.fill();
     const shapeOnlyID = this.game.accessibility.shapeOnlyID;
     ctx.strokeStyle = drawColor;
@@ -2035,16 +2044,16 @@ class Boss {
     const barX = rx - barW / 2;
     const barY = ry - s - barH - 14;
     const hpR  = Utils.clamp(this.hp / this.maxHp, 0, 1);
-    ctx.fillStyle = "rgba(255,45,85,0.35)";
+    ctx.fillStyle = "rgba(148,0,211,0.3)";
     ctx.fillRect(barX, barY, barW, barH);
-    ctx.fillStyle = "#ff2d55";
+    ctx.fillStyle = "#9400D3";
     ctx.fillRect(barX, barY, barW * hpR, barH);
 
     ctx.save();
     ctx.font      = `900 ${Math.max(14, 18 * this.game.uiScale)}px ${CONFIG.HUD_FONT}`;
-    ctx.fillStyle = "#ff2d55";
+    ctx.fillStyle = "#9400D3";
     ctx.textAlign = "center";
-    ctx.shadowColor = "#ff2d55";
+    ctx.shadowColor = "#9400D3";
     ctx.shadowBlur  = 10;
     ctx.fillText("BOSS", rx, barY - 6);
     ctx.restore();
@@ -3050,19 +3059,19 @@ class UIManager {
     ctx.fillStyle = CONFIG.HUD_COLOR_MAIN;
     const bossLabel = g.boss ? "  ☠ BOSS WAVE" : "";
     const dailyLabel = g.dailyMode ? "  📅 DAILY" : "";
-    ctx.fillStyle = g.boss ? "#ff2d55" : CONFIG.HUD_COLOR_MAIN;
+    ctx.fillStyle = g.boss ? "#9400D3" : CONFIG.HUD_COLOR_MAIN;
     const progressLabel = g.boss
       ? `BOSS HP ${Math.max(0, Math.ceil(g.boss.hp))}/${g.boss.maxHp}`
       : `KILLS ${g.kills}/${g.wave}   ENEMIES ${g.enemies.length}`;
     ctx.fillText(`WAVE ${g.wave}${bossLabel}${dailyLabel}   ${progressLabel}`, m, m);
 
     ctx.font      = `600 ${Math.max(12, 14 * s)}px ${CONFIG.HUD_FONT}`;
-    ctx.fillStyle = "rgba(232,240,254,0.7)";
+    ctx.fillStyle = "rgba(211,211,255,0.7)";
     ctx.fillText(`Time: ${g.gameTime.toFixed(1)}s   Level ${p.stats.level}`, m, m + lh);
 
     const showGhostLine = g.dailyMode && !!g.ghostPlayback;
     if (showGhostLine) {
-      ctx.fillStyle = "#5ad1ff";
+      ctx.fillStyle = "#ED80E9";
       ctx.fillText(`\u{1F47B} Ghost PB: Wave ${g.ghostPlayback.wave}`, m, m + lh * 2);
     }
 
@@ -3087,7 +3096,14 @@ class UIManager {
     const hpR = Utils.clamp(p.health / p.maxHealth, 0, 1);
     ctx.fillStyle = CONFIG.HUD_COLOR_HP_BG;
     this._roundRect(ctx, m, hbY, hbW, hbH, 4);
-    ctx.fillStyle = g.getColor("HUD_COLOR_HP_FG");
+    // FIX(theme2): low-health warning state — pulse the fill toward --text-highlight
+    // instead of leaving the bar a flat --primary once health gets critical.
+    if (hpR > 0 && hpR <= CONFIG.LOW_HEALTH_THRESHOLD && !g.accessibility.colorblindMode) {
+      const pulse = 0.5 + 0.5 * Math.sin(g.gameTime * 8);
+      ctx.fillStyle = pulse > 0.5 ? "#D3D3FF" : g.getColor("HUD_COLOR_HP_FG");
+    } else {
+      ctx.fillStyle = g.getColor("HUD_COLOR_HP_FG");
+    }
     if (hpR > 0) this._roundRect(ctx, m, hbY, hbW * hpR, hbH, 4);
     ctx.font      = `700 ${Math.max(11, 13 * s)}px ${CONFIG.HUD_FONT}`;
     ctx.fillStyle = CONFIG.HUD_COLOR_MAIN;
@@ -3102,14 +3118,14 @@ class UIManager {
     ctx.fillStyle = CONFIG.HUD_COLOR_XP_FG;
     if (xpR > 0) this._roundRect(ctx, m, xbY, xbW * xpR, xbH, 3);
     ctx.font      = `600 ${Math.max(10, 12 * s)}px ${CONFIG.HUD_FONT}`;
-    ctx.fillStyle = "rgba(0,229,255,0.8)";
+    ctx.fillStyle = "rgba(237,128,233,0.8)";
     ctx.fillText(`XP  ${p.stats.xp} / ${p.stats.xpToNext}`, m, xbY + xbH + 4);
 
     let buffY = xbY + xbH + 22 * s;
     for (const key in p.buffs) {
       if (p.buffs[key] > 0) {
         ctx.font      = `700 ${Math.max(11, 13 * s)}px ${CONFIG.HUD_FONT}`;
-        ctx.fillStyle = CONFIG.POWERUP_COLORS[key] || "#fff";
+        ctx.fillStyle = CONFIG.POWERUP_COLORS[key] || "#D3D3FF";
         ctx.fillText(`${key.toUpperCase()}  ${p.buffs[key].toFixed(1)}s`, m, buffY);
         buffY += lh;
       }
@@ -3124,7 +3140,7 @@ class UIManager {
     for (const key in synergies) {
       if (synergies[key]) {
         ctx.font      = `700 ${Math.max(10, 12 * s)}px ${CONFIG.HUD_FONT}`;
-        ctx.fillStyle = "#f1c40f";
+        ctx.fillStyle = "#ED80E9";
         ctx.fillText(synergyLabels[key], m, buffY);
         buffY += lh * 0.8;
       }
@@ -3134,7 +3150,7 @@ class UIManager {
     if (coverPct < 30) {
       const pulse = 0.6 + 0.4 * Math.sin(g.gameTime * 6);
       ctx.font      = `700 ${Math.max(11, 13 * s)}px ${CONFIG.HUD_FONT}`;
-      ctx.fillStyle = `rgba(255,45,85,${pulse})`;
+      ctx.fillStyle = `rgba(255,168,150,${pulse})`;
       ctx.fillText(`\u26A0 COVER ${coverPct}%`, m, buffY);
       buffY += lh * 0.8;
     }
@@ -3146,13 +3162,13 @@ class UIManager {
       ctx.fillRect(0, 0, g.width, g.height);
       ctx.textAlign = "center";
       ctx.font      = `900 ${Math.max(18, 28 * s)}px ${CONFIG.HUD_FONT}`;
-      ctx.fillStyle = "rgba(0,229,255,0.9)";
+      ctx.fillStyle = "rgba(148,0,211,0.9)";
       ctx.fillText("⏸ PAUSED", g.width / 2, g.height / 2 - 28 * s);
       ctx.font      = `600 ${Math.max(13, 17 * s)}px ${CONFIG.HUD_FONT}`;
-      ctx.fillStyle = "rgba(232,240,254,0.6)";
+      ctx.fillStyle = "rgba(211,211,255,0.6)";
       ctx.fillText("ESC or ⏸ to resume", g.width / 2, g.height / 2 + 8 * s);
       ctx.font      = `600 ${Math.max(11, 14 * s)}px ${CONFIG.HUD_FONT}`;
-      ctx.fillStyle = "rgba(232,240,254,0.35)";
+      ctx.fillStyle = "rgba(211,211,255,0.35)";
       ctx.fillText("Q — Quit to Main Menu  |  E / Shift — cycle weapon", g.width / 2, g.height / 2 + 34 * s);
 
       if (state === GameState.PAUSED) {
@@ -3160,7 +3176,7 @@ class UIManager {
         const statLine = `Wave ${g.wave} · Kills ${g.kills} · ${g.gameTime.toFixed(1)}s` +
           ` · GUN:${ws.default} SHOT:${ws.spread} LASER:${ws.laser}`;
         ctx.font      = `600 ${Math.max(10, 12 * s)}px ${CONFIG.HUD_FONT}`;
-        ctx.fillStyle = "rgba(232,240,254,0.22)";
+        ctx.fillStyle = "rgba(211,211,255,0.22)";
         ctx.fillText(statLine, g.width / 2, g.height / 2 + 58 * s);
       }
       ctx.textAlign = "left";
@@ -3170,7 +3186,7 @@ class UIManager {
       ctx.fillStyle = "rgba(0,0,0,0.78)";
       ctx.fillRect(0, 0, g.width, g.height);
       ctx.textAlign = "center";
-      ctx.fillStyle = "#ff2d55";
+      ctx.fillStyle = "#CD1C18";
       ctx.font      = `900 ${Math.max(28, 52 * s)}px ${CONFIG.HUD_FONT}`;
       ctx.fillText("MISSION FAILED", g.width / 2, g.height / 2 - 60 * s);
       ctx.fillStyle = CONFIG.HUD_COLOR_MAIN;
@@ -3199,7 +3215,7 @@ class UIManager {
     ctx.textAlign    = "center";
     ctx.textBaseline = "top";
     ctx.font         = `700 ${Math.max(13, 16 * s)}px ${CONFIG.HUD_FONT}`;
-    ctx.fillStyle    = `rgba(232,240,254,${0.85 * fade})`;
+    ctx.fillStyle    = `rgba(211,211,255,${0.85 * fade})`;
     ctx.fillText(text, g.width / 2, 20 * s);
     ctx.restore();
   }
@@ -3494,7 +3510,7 @@ class CombatSystem {
                   b.x = e.x; b.y = e.y;
                   b.dx = Math.cos(ang) * speed;
                   b.dy = Math.sin(ang) * speed;
-                  ctx.spawnParticles(e.x, e.y, "#ffe66d", 4);
+                  ctx.spawnParticles(e.x, e.y, "#FFA896", 4);
                 } else {
                   hit = true;
                 }
@@ -3530,7 +3546,7 @@ class CombatSystem {
                       }
                     }
                   }
-                  ctx.spawnParticles(e.x, e.y, "#ff9f43", 10);
+                  ctx.spawnParticles(e.x, e.y, "#FFA896", 10);
                   if (mods.detonatorMastery && mods.detonatorCorrupt) ctx.triggerCorrosivePulse(e.x, e.y);
                 }
                 const lastIdx    = ctx.enemies.length - 1;
@@ -4114,7 +4130,7 @@ class Game {
   _draw(alpha) {
     const ctx = this.ctx;
 
-    ctx.fillStyle = "#050810";
+    ctx.fillStyle = "#14040D";
     ctx.fillRect(0, 0, this.width, this.height);
 
     const waveLevel  = Utils.clamp(this.wave / 15, 0, 1);
@@ -4151,32 +4167,32 @@ class Game {
       let shadowActive = false;
       for (const c of this.crates) {
         if (c.isPillar) {
-          ctx.fillStyle   = "#0d1220";
+          ctx.fillStyle   = "#14040D";
           ctx.fillRect(c.x, c.y, c.w, c.h);
-          ctx.strokeStyle = "rgba(0,229,255,0.55)";
+          ctx.strokeStyle = "rgba(148,0,211,0.55)";
           ctx.lineWidth   = 2;
           if (!shadowActive) {
-            ctx.shadowColor = "#00e5ff";
+            ctx.shadowColor = "#9400D3";
             ctx.shadowBlur  = 8;
             shadowActive = true;
           }
           ctx.strokeRect(c.x + 1, c.y + 1, c.w - 2, c.h - 2);
-          ctx.fillStyle = "rgba(0,229,255,0.08)";
+          ctx.fillStyle = "rgba(148,0,211,0.08)";
           ctx.fillRect(c.x + c.w * 0.35, c.y, c.w * 0.3, c.h);
         } else {
           if (shadowActive) { ctx.shadowBlur = 0; shadowActive = false; }
-          ctx.fillStyle = "#1c2535";
+          ctx.fillStyle = "#2A0A1C";
           ctx.fillRect(c.x, c.y, c.w, c.h);
-          ctx.strokeStyle = "rgba(255,180,60,0.5)";
+          ctx.strokeStyle = "rgba(155,19,19,0.5)";
           ctx.lineWidth   = 1.5;
           ctx.strokeRect(c.x + 1, c.y + 1, c.w - 2, c.h - 2);
-          ctx.strokeStyle = "rgba(255,180,60,0.15)";
+          ctx.strokeStyle = "rgba(155,19,19,0.15)";
           ctx.lineWidth   = 1;
           ctx.beginPath();
           ctx.moveTo(c.x, c.y); ctx.lineTo(c.x + c.w, c.y + c.h);
           ctx.moveTo(c.x + c.w, c.y); ctx.lineTo(c.x, c.y + c.h);
           ctx.stroke();
-          ctx.fillStyle = "rgba(255,180,60,0.55)";
+          ctx.fillStyle = "rgba(155,19,19,0.55)";
           const rv = 3;
           for (const [rx, ry] of [[c.x+rv, c.y+rv],[c.x+c.w-rv, c.y+rv],[c.x+rv, c.y+c.h-rv],[c.x+c.w-rv, c.y+c.h-rv]]) {
             ctx.beginPath(); ctx.arc(rx, ry, rv * 0.7, 0, Math.PI * 2); ctx.fill();
@@ -4207,7 +4223,7 @@ class Game {
         const glyph = CONFIG.POWERUP_GLYPHS[pu.type];
         if (!glyph) continue;
         ctx.font = `700 ${Math.max(10, (pu.size + pulse) * 1.15)}px ${CONFIG.HUD_FONT}`;
-        ctx.fillStyle = "rgba(5,8,16,0.85)";
+        ctx.fillStyle = "rgba(20,4,13,0.85)";
         ctx.fillText(glyph, pu.x, pu.y + 1);
         ctx.fillStyle = "#ffffff";
         ctx.fillText(glyph, pu.x, pu.y);
@@ -4236,7 +4252,7 @@ class Game {
       const glow = GlowCache.get(b.color, b.size, b.size * 3);
       ctx.drawImage(glow.canvas, rx - glow.half, ry - glow.half);
     }
-    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.fillStyle = "rgba(211,211,255,0.85)";
     ctx.beginPath();
     for (const b of this.bullets) {
       if (!b.active) continue;
@@ -4289,9 +4305,9 @@ class Game {
         this.width / 2, this.height / 2, this.height * 0.25,
         this.width / 2, this.height / 2, this.height * 0.85
       );
-      grad.addColorStop(0,   "rgba(255,0,30,0)");
-      grad.addColorStop(0.6, `rgba(255,0,30,${(a * 0.55).toFixed(3)})`);
-      grad.addColorStop(1,   `rgba(255,0,30,${a.toFixed(3)})`);
+      grad.addColorStop(0,   "rgba(205,28,24,0)");
+      grad.addColorStop(0.6, `rgba(205,28,24,${(a * 0.55).toFixed(3)})`);
+      grad.addColorStop(1,   `rgba(205,28,24,${a.toFixed(3)})`);
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, this.width, this.height);
       this.damageFlash = Math.max(0, this.damageFlash - 1.8 / 60);
@@ -4303,18 +4319,18 @@ class Game {
       ctx.textAlign    = "center";
       ctx.textBaseline = "middle";
       ctx.font         = `900 52px ${CONFIG.HUD_FONT_DISPLAY}`;
-      ctx.fillStyle    = "#00e5ff";
-      ctx.shadowColor  = "#00e5ff";
+      ctx.fillStyle    = "#9400D3";
+      ctx.shadowColor  = "#9400D3";
       ctx.shadowBlur   = 20;
       ctx.fillText(`WAVE ${this.wave + 1} INCOMING`, this.width / 2, this.height / 2 - 40);
       ctx.font         = `700 28px ${CONFIG.HUD_FONT}`;
-      ctx.fillStyle    = "rgba(255,255,255,0.7)";
+      ctx.fillStyle    = "rgba(211,211,255,0.7)";
       ctx.shadowBlur   = 0;
       ctx.fillText(String(countdown), this.width / 2, this.height / 2 + 20);
       if (this._bossWarning) {
         ctx.font        = `700 22px ${CONFIG.HUD_FONT}`;
-        ctx.fillStyle   = "#ff2d55";
-        ctx.shadowColor = "#ff2d55";
+        ctx.fillStyle   = "#ED80E9";
+        ctx.shadowColor = "#ED80E9";
         ctx.shadowBlur  = 12;
         ctx.fillText("⚠ BOSS INCOMING", this.width / 2, this.height / 2 + 60);
       }
@@ -4327,18 +4343,18 @@ class Game {
       ctx.textBaseline = "middle";
 
       ctx.font = `bold 17px ${CONFIG.HUD_FONT}`;
-      ctx.fillStyle = "#ff2d55";
+      ctx.fillStyle = "#9400D3";
       for (const dn of this.damageNumbers) {
         if (dn.life > 0 && dn.isBoss) dn.draw(ctx);
       }
 
-      ctx.fillStyle = "#f1c40f";
+      ctx.fillStyle = "#ED80E9";
       for (const dn of this.damageNumbers) {
         if (dn.life > 0 && !dn.isBoss && dn.isCrit) dn.draw(ctx);
       }
 
       ctx.font = `bold 14px ${CONFIG.HUD_FONT}`;
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = "#FFA896";
       for (const dn of this.damageNumbers) {
         if (dn.life > 0 && !dn.isBoss && !dn.isCrit) dn.draw(ctx);
       }
@@ -4416,11 +4432,11 @@ class Game {
     const padY   = 8;
     const boxW   = 300;
     const boxH   = padY * 2 + lines.length * lineH;
-    ctx.fillStyle = "rgba(5,8,16,0.72)";
+    ctx.fillStyle = "rgba(20,4,13,0.72)";
     ctx.fillRect(8, 8, boxW, boxH);
-    ctx.fillStyle = "#00e5ff";
+    ctx.fillStyle = "#9400D3";
     ctx.fillText("DEV PERF (`)", 8 + padX, 8 + padY + 10);
-    ctx.fillStyle = "#e8f0fe";
+    ctx.fillStyle = "#D3D3FF";
     for (let i = 0; i < lines.length; i++) {
       ctx.fillText(lines[i], 8 + padX, 8 + padY + 10 + (i + 1) * lineH);
     }
@@ -4528,7 +4544,7 @@ class Game {
     for (let i = this._pendingDestruction.length - 1; i >= 0; i--) {
       const target = this._pendingDestruction[i];
       if (this.gameTime >= target._envDestructAt) {
-        this.spawnParticles(target.x + target.w / 2, target.y + target.h / 2, "#ff2d55", 14);
+        this.spawnParticles(target.x + target.w / 2, target.y + target.h / 2, "#CD1C18", 14);
         this._addShake(6);
         target._envDestroyed = true;
         this._pendingDestruction.splice(i, 1);
@@ -4586,12 +4602,12 @@ class Game {
 
     const pulseSpeed = 8 + (1 - frac) * 10;
     const pulse      = 0.12 + 0.14 * Math.sin(this.gameTime * pulseSpeed);
-    ctx.fillStyle = `rgba(255,45,85,${pulse})`;
+    ctx.fillStyle = `rgba(205,28,24,${pulse})`;
     ctx.fillRect(obj.x, obj.y, obj.w, obj.h);
 
-    ctx.fillStyle = "rgba(255,45,85,0.25)";
+    ctx.fillStyle = "rgba(42,10,28,0.5)";
     ctx.fillRect(obj.x, barY, obj.w, 4);
-    ctx.fillStyle = "#ff2d55";
+    ctx.fillStyle = "#CD1C18";
     ctx.fillRect(obj.x, barY, obj.w * frac, 4);
   }
 
@@ -4821,9 +4837,9 @@ class Game {
       ctx.globalAlpha = alpha;
 
       const grad = ctx.createRadialGradient(z.x, z.y, 0, z.x, z.y, z.radius);
-      grad.addColorStop(0,   "rgba(80,10,110,0.5)");
-      grad.addColorStop(0.65,"rgba(40,5,60,0.32)");
-      grad.addColorStop(1,   "rgba(15,0,25,0)");
+      grad.addColorStop(0,   "rgba(148,0,211,0.45)");
+      grad.addColorStop(0.65,"rgba(74,0,105,0.3)");
+      grad.addColorStop(1,   "rgba(20,4,13,0)");
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(z.x, z.y, z.radius, 0, Math.PI * 2);
@@ -4854,7 +4870,7 @@ class Game {
         const r     = z.radius * m.radiusFrac;
         const mx    = z.x + Math.cos(angle) * r;
         const my    = z.y + Math.sin(angle) * r + Math.sin(this.gameTime * 1.5 + m.bob) * 3;
-        ctx.fillStyle = "rgba(210,140,255,0.65)";
+        ctx.fillStyle = "rgba(237,128,233,0.65)";
         ctx.beginPath();
         ctx.arc(mx, my, 1.8, 0, Math.PI * 2);
         ctx.fill();
@@ -4867,8 +4883,8 @@ class Game {
     const g = this.ghostPlayback;
     ctx.save();
     ctx.globalAlpha = 0.45;
-    ctx.fillStyle   = "#5ad1ff";
-    ctx.strokeStyle = "#5ad1ff";
+    ctx.fillStyle   = "#ED80E9";
+    ctx.strokeStyle = "#ED80E9";
     ctx.lineWidth   = 2;
     ctx.beginPath();
     ctx.arc(g.x, g.y, 14, 0, Math.PI * 2);
@@ -5032,14 +5048,14 @@ function showFatalErrorOverlay(err) {
     "display:flex", "flex-direction:column",
     "align-items:center", "justify-content:center",
     "gap:16px", "padding:24px", "text-align:center",
-    "background:rgba(20,14,9,0.94)", "color:#f1e8da",
+    "background:rgba(20,4,13,0.94)", "color:#D3D3FF",
     `font-family:${CONFIG.HUD_FONT}`, "font-size:20px",
   ].join(";");
   overlay.innerHTML = `
     <div>Something went wrong — reload to keep playing.</div>
     <button type="button" style="
       font:inherit; font-weight:700; padding:10px 24px; cursor:pointer;
-      background:#e6862c; color:#0d0906; border:none; border-radius:6px;
+      background:#CD1C18; color:#D3D3FF; border:none; border-radius:6px;
     ">Reload</button>`;
   overlay.querySelector("button").addEventListener("click", () => window.location.reload());
   document.body.appendChild(overlay);
