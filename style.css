@@ -5,25 +5,43 @@
   --ui-scale: 1;
   --text-scale: 1;
 
-  
-  --col-bg: #0d0906;
-  --col-bg-mid: #15100a;
-  --col-glass: rgba(28, 18, 10, 0.72);
-  --col-glass-border: rgba(230, 140, 40, 0.18);
-  --col-glass-shine: rgba(230, 140, 40, 0.06);
+  /* FIX(theme2): "Blood Orchid" palette -- canonical source of truth for every
+     UI color AND every canvas fillStyle/strokeStyle/gradient stop in game.js.
+     Don't hand-pick new hex values anywhere else; derive from these 9. */
+  --void-bg:        #14040D;
+  --panel-surface:  #2A0A1C;
+  --primary:        #CD1C18;
+  --primary-deep:   #9B1313;
+  --accent-violet:  #9400D3;
+  --accent-magenta: #ED80E9;
+  --text-highlight: #D3D3FF;
+  --text-muted:     #D8BFD8;
+  --warm-glow:      #FFA896;
 
-  --col-primary: #e6862c;
-  --col-primary-dim: rgba(230, 140, 40, 0.15);
-  --col-primary-glow: rgba(230, 140, 40, 0.55);
+  /* Legacy token names kept as aliases so the rest of this file (and any
+     inline styles injected from game.js) keep working unchanged.
+     --col-primary is the dominant/most-used UI hue (buttons, borders, HUD) ->
+     bright --primary. --col-accent is reserved for urgent/danger actions
+     (shoot, quit, restart) -> --accent-violet, so it pops against the sea
+     of primary red instead of blending in. */
+  --col-bg: var(--void-bg);
+  --col-bg-mid: #1f0714;
+  --col-glass: rgba(42, 10, 28, 0.72);
+  --col-glass-border: rgba(205, 28, 24, 0.18);
+  --col-glass-shine: rgba(205, 28, 24, 0.06);
 
-  --col-accent: #ff3d2e;
-  --col-accent-dim: rgba(255, 61, 46, 0.15);
-  --col-accent-glow: rgba(255, 61, 46, 0.55);
+  --col-primary: var(--primary);
+  --col-primary-dim: rgba(205, 28, 24, 0.15);
+  --col-primary-glow: rgba(205, 28, 24, 0.55);
+
+  --col-accent: var(--accent-violet);
+  --col-accent-dim: rgba(148, 0, 211, 0.15);
+  --col-accent-glow: rgba(148, 0, 211, 0.55);
 
   --col-success: #a3b565;
-  --col-warn: #f39c12;
-  --col-text: #f1e8da;
-  --col-text-muted: rgba(241, 232, 218, 0.5);
+  --col-warn: var(--warm-glow);
+  --col-text: var(--text-highlight);
+  --col-text-muted: rgba(216, 191, 216, 0.65);
 
   /* FIX(theme1): Orbitron/Rajdhani were previously pulled from fonts.googleapis.com —
      a live third-party network call at load time, violating the zero-dependency /
@@ -49,8 +67,8 @@
 
   
   --shadow-panel: 0 24px 64px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--col-glass-border);
-  --glow-primary: 0 0 12px var(--col-primary-glow), 0 0 30px rgba(230, 140, 40, 0.2);
-  --glow-accent: 0 0 12px var(--col-accent-glow), 0 0 30px rgba(255, 61, 46, 0.2);
+  --glow-primary: 0 0 12px var(--col-primary-glow), 0 0 30px rgba(205, 28, 24, 0.2);
+  --glow-accent: 0 0 12px var(--col-accent-glow), 0 0 30px rgba(148, 0, 211, 0.2);
 
   
   --ease-snap: cubic-bezier(0.175, 0.885, 0.32, 1.275);
@@ -88,8 +106,8 @@ body {
   background-image: repeating-linear-gradient(0deg,
       transparent,
       transparent 3px,
-      rgba(230, 140, 40, 0.012) 3px,
-      rgba(230, 140, 40, 0.012) 4px);
+      rgba(205, 28, 24, 0.012) 3px,
+      rgba(205, 28, 24, 0.012) 4px);
 }
 
 .sr-only {
@@ -191,6 +209,18 @@ body {
   transform: translate(-50%, -50%) scale(0.9);
 }
 
+/* FIX(theme2): "combat" panels (stats/rankings) border in --primary-deep;
+   "power" panels (upgrades/ascension) border in --accent-violet. */
+#leaderboardScreen {
+  border-color: rgba(155, 19, 19, 0.4);
+}
+
+#upgradesScreen,
+#ascensionScreen,
+#levelUpScreen {
+  border-color: rgba(148, 0, 211, 0.4);
+}
+
 .screen__title {
   font-family: var(--font-display);
   font-size: calc(1.8rem * var(--ui-scale) * var(--text-scale));
@@ -233,8 +263,8 @@ body {
   letter-spacing: 4px;
   text-shadow:
     0 0 20px var(--col-primary-glow),
-    0 0 60px rgba(230, 140, 40, 0.3),
-    0 0 100px rgba(230, 140, 40, 0.1);
+    0 0 60px rgba(205, 28, 24, 0.3),
+    0 0 100px rgba(205, 28, 24, 0.1);
   animation: neon-flicker 6s ease-in-out infinite;
   
   will-change: opacity;
@@ -311,7 +341,7 @@ body {
 
 .input-field:focus {
   border-color: var(--col-primary);
-  box-shadow: var(--glow-primary), inset 0 0 20px rgba(230, 140, 40, 0.05);
+  box-shadow: var(--glow-primary), inset 0 0 20px rgba(205, 28, 24, 0.05);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -363,18 +393,18 @@ button:active {
   letter-spacing: 4px;
   color: var(--col-bg);
   background: var(--col-primary);
-  box-shadow: var(--glow-primary), 0 4px 20px rgba(230, 140, 40, 0.3);
+  box-shadow: var(--glow-primary), 0 4px 20px rgba(205, 28, 24, 0.3);
 }
 
 .btn--primary:hover {
   transform: translateY(-3px);
-  box-shadow: var(--glow-primary), 0 8px 32px rgba(230, 140, 40, 0.45);
+  box-shadow: var(--glow-primary), 0 8px 32px rgba(205, 28, 24, 0.45);
 }
 
 .btn__glow {
   position: absolute;
   inset: -50%;
-  background: conic-gradient(transparent 0deg, rgba(230, 140, 40, 0.3) 90deg, transparent 180deg);
+  background: conic-gradient(transparent 0deg, rgba(205, 28, 24, 0.3) 90deg, transparent 180deg);
   animation: btn-spin 3s linear infinite;
   z-index: -1;
   will-change: transform;
@@ -399,9 +429,11 @@ button:active {
 }
 
 .btn--upgrade:hover {
-  background: var(--col-primary);
-  color: var(--col-bg);
-  border-color: var(--col-primary);
+  /* FIX(theme2): fill deepens to --primary-deep on hover (per-spec "pressed/hover"
+     token) with light text, instead of dark-on-bright which fails WCAG AA here */
+  background: var(--primary-deep);
+  color: var(--text-highlight);
+  border-color: var(--primary-deep);
   box-shadow: var(--glow-primary);
   transform: translateX(4px);
 }
@@ -413,14 +445,14 @@ button:active {
   letter-spacing: 2px;
   color: var(--col-text);
   background: var(--col-accent-dim);
-  border: 1px solid rgba(255, 61, 46, 0.4);
+  border: 1px solid rgba(148, 0, 211, 0.4);
   box-shadow: var(--glow-accent);
 }
 
 .btn--danger:hover {
   background: var(--col-accent);
-  color: #fff;
-  box-shadow: var(--glow-accent), 0 8px 32px rgba(255, 61, 46, 0.4);
+  color: var(--text-highlight);
+  box-shadow: var(--glow-accent), 0 8px 32px rgba(148, 0, 211, 0.4);
 }
 
 .btn--menu {
@@ -429,15 +461,15 @@ button:active {
   font-family: var(--font-display);
   letter-spacing: 2px;
   color: var(--col-text);
-  background: rgba(230, 140, 40, 0.08);
-  border: 1px solid rgba(230, 140, 40, 0.35);
+  background: rgba(205, 28, 24, 0.08);
+  border: 1px solid rgba(205, 28, 24, 0.35);
   box-shadow: var(--glow-primary);
 }
 
 .btn--menu:hover {
-  background: var(--col-primary);
-  color: var(--col-bg);
-  box-shadow: var(--glow-primary), 0 8px 32px rgba(230, 140, 40, 0.3);
+  background: var(--primary-deep);
+  color: var(--text-highlight);
+  box-shadow: var(--glow-primary), 0 8px 32px rgba(205, 28, 24, 0.3);
 }
 
 /* FIX(menu1): trigger row for the leaderboard/upgrades modals — sits below DEPLOY,
@@ -456,7 +488,7 @@ button:active {
   font-weight: 700;
   letter-spacing: 1px;
   color: var(--col-text-muted);
-  background: rgba(230, 140, 40, 0.06);
+  background: rgba(205, 28, 24, 0.06);
   border: 1px solid var(--col-glass-border);
   border-radius: var(--radius-sm);
 }
@@ -543,7 +575,8 @@ button:active {
 .leaderboard th {
   font-family: var(--font-display);
   font-size: calc(0.7rem * var(--ui-scale) * var(--text-scale));
-  color: var(--col-primary);
+  /* FIX(theme2): small text -> --warm-glow instead of --col-primary for WCAG AA */
+  color: var(--warm-glow);
   letter-spacing: 2px;
   padding-bottom: var(--space-sm);
   border-bottom: 1px solid var(--col-glass-border);
@@ -557,7 +590,7 @@ button:active {
 }
 
 .leaderboard tr:first-child td {
-  color: var(--col-primary);
+  color: var(--warm-glow);
   font-weight: 700;
 }
 
@@ -582,19 +615,19 @@ button:active {
   left: calc(44px * var(--ui-scale));
   width: calc(120px * var(--ui-scale));
   height: calc(120px * var(--ui-scale));
-  background: rgba(230, 140, 40, 0.06);
-  border: 2px solid rgba(230, 140, 40, 0.25);
+  background: rgba(205, 28, 24, 0.06);
+  border: 2px solid rgba(205, 28, 24, 0.25);
   border-radius: 50%;
   pointer-events: auto;
   touch-action: none;
-  box-shadow: 0 0 24px rgba(230, 140, 40, 0.1);
+  box-shadow: 0 0 24px rgba(205, 28, 24, 0.1);
   transition: border-color var(--dur-fast);
 }
 
 .joystick:active,
 .joystick--active {
-  border-color: rgba(230, 140, 40, 0.6);
-  box-shadow: 0 0 24px rgba(230, 140, 40, 0.35);
+  border-color: rgba(205, 28, 24, 0.6);
+  box-shadow: 0 0 24px rgba(205, 28, 24, 0.35);
 }
 
 .joystick__knob {
@@ -603,11 +636,11 @@ button:active {
   left: 50%;
   width: 48%;
   height: 48%;
-  background: radial-gradient(circle at 35% 35%, rgba(230, 140, 40, 0.9), rgba(230, 140, 40, 0.4));
+  background: radial-gradient(circle at 35% 35%, rgba(205, 28, 24, 0.9), rgba(205, 28, 24, 0.4));
   border-radius: 50%;
   transform: translate(-50%, -50%);
   pointer-events: none;
-  box-shadow: 0 0 12px rgba(230, 140, 40, 0.5);
+  box-shadow: 0 0 12px rgba(205, 28, 24, 0.5);
   transition: width var(--dur-fast), height var(--dur-fast);
   
   will-change: transform;
@@ -621,7 +654,7 @@ button:active {
   height: calc(90px * var(--ui-scale));
   border-radius: 50%;
   background: var(--col-accent-dim);
-  border: 2px solid rgba(255, 61, 46, 0.5);
+  border: 2px solid rgba(148, 0, 211, 0.5);
   color: var(--col-text);
   font-family: var(--font-display);
   font-size: calc(0.7rem * var(--ui-scale) * var(--text-scale));
@@ -634,7 +667,7 @@ button:active {
 
 .btn--shoot:active {
   background: var(--col-accent);
-  box-shadow: var(--glow-accent), 0 0 32px rgba(255, 61, 46, 0.7);
+  box-shadow: var(--glow-accent), 0 0 32px rgba(148, 0, 211, 0.7);
 }
 
 .btn--pause {
@@ -644,8 +677,8 @@ button:active {
   width: calc(52px * var(--ui-scale));
   height: calc(52px * var(--ui-scale));
   border-radius: 50%;
-  background: rgba(230, 140, 40, 0.08);
-  border: 2px solid rgba(230, 140, 40, 0.35);
+  background: rgba(205, 28, 24, 0.08);
+  border: 2px solid rgba(205, 28, 24, 0.35);
   color: var(--col-primary);
   font-size: calc(1.3rem * var(--ui-scale) * var(--text-scale));
   pointer-events: auto;
@@ -658,8 +691,8 @@ button:active {
 }
 
 .btn--pause:active {
-  background: rgba(230, 140, 40, 0.25);
-  box-shadow: var(--glow-primary), 0 0 32px rgba(230, 140, 40, 0.5);
+  background: rgba(205, 28, 24, 0.25);
+  box-shadow: var(--glow-primary), 0 0 32px rgba(205, 28, 24, 0.5);
 }
 
 .btn--quit {
@@ -669,8 +702,8 @@ button:active {
   width: calc(52px * var(--ui-scale));
   height: calc(52px * var(--ui-scale));
   border-radius: 50%;
-  background: rgba(255, 61, 46, 0.08);
-  border: 2px solid rgba(255, 61, 46, 0.35);
+  background: rgba(148, 0, 211, 0.08);
+  border: 2px solid rgba(148, 0, 211, 0.35);
   color: var(--col-accent);
   font-size: calc(1.2rem * var(--ui-scale) * var(--text-scale));
   pointer-events: auto;
@@ -683,21 +716,21 @@ button:active {
 }
 
 .btn--quit:active {
-  background: rgba(255, 61, 46, 0.3);
+  background: rgba(148, 0, 211, 0.3);
 }
 
 @media (hover: hover) and (pointer: fine) {
   .btn--shoot:hover {
-    background: rgba(255, 61, 46, 0.22);
-    box-shadow: var(--glow-accent), 0 0 28px rgba(255, 61, 46, 0.35);
+    background: rgba(148, 0, 211, 0.22);
+    box-shadow: var(--glow-accent), 0 0 28px rgba(148, 0, 211, 0.35);
   }
 
   .btn--pause:hover {
-    background: rgba(230, 140, 40, 0.18);
+    background: rgba(205, 28, 24, 0.18);
   }
 
   .btn--quit:hover {
-    background: rgba(255, 61, 46, 0.18);
+    background: rgba(148, 0, 211, 0.18);
   }
 }
 
@@ -817,7 +850,7 @@ button:active {
   align-items: center;
   justify-content: center;
   gap: var(--space-md);
-  background: rgba(20, 14, 9, 0.97);
+  background: rgba(20, 4, 13, 0.97);
   text-align: center;
   padding: var(--space-lg);
 }
@@ -878,7 +911,7 @@ button:active {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 0.75rem;
-  border-bottom: 1px solid rgba(230, 140, 40, 0.18);
+  border-bottom: 1px solid rgba(205, 28, 24, 0.18);
   padding-bottom: 0.5rem;
 }
 
@@ -886,7 +919,7 @@ button:active {
   font-family: var(--font-display);
   font-size: calc(0.75rem * var(--text-scale));
   font-weight: 700;
-  color: var(--col-primary);
+  color: var(--warm-glow);
   letter-spacing: 0.06em;
 }
 
@@ -925,7 +958,7 @@ button:active {
 .shop-desc {
   font-family: var(--font-ui);
   font-size: calc(0.72rem * var(--text-scale));
-  color: rgba(241,232,218,0.45);
+  color: rgba(211,211,255,0.45);
 }
 
 .btn--shop {
@@ -940,9 +973,9 @@ button:active {
   transition: opacity 0.15s;
 }
 
-.btn--shop-buy  { background: rgba(230,140,40,0.15); color: var(--col-primary); border: 1px solid rgba(230,140,40,0.5); }
-.btn--shop-buy:hover { background: rgba(230,140,40,0.28); }
-.btn--shop-poor { background: rgba(255,255,255,0.05); color: rgba(241,232,218,0.3); border: 1px solid rgba(255,255,255,0.1); cursor: not-allowed; }
+.btn--shop-buy  { background: rgba(205,28,24,0.15); color: var(--warm-glow); border: 1px solid rgba(205,28,24,0.5); }
+.btn--shop-buy:hover { background: rgba(205,28,24,0.28); }
+.btn--shop-poor { background: rgba(255,255,255,0.05); color: rgba(211,211,255,0.3); border: 1px solid rgba(255,255,255,0.1); cursor: not-allowed; }
 .btn--shop-maxed { background: rgba(163,181,101,0.12); color: var(--col-success); border: 1px solid rgba(163,181,101,0.35); cursor: default; }
 
 .game-over-coins {
@@ -965,8 +998,8 @@ button:active {
   width: calc(40px * var(--ui-scale));
   height: calc(40px * var(--ui-scale));
   border-radius: 50%;
-  background: rgba(230, 140, 40, 0.08);
-  border: 1px solid rgba(230, 140, 40, 0.35);
+  background: rgba(205, 28, 24, 0.08);
+  border: 1px solid rgba(205, 28, 24, 0.35);
   color: var(--col-primary);
   font-size: calc(1.1rem * var(--ui-scale) * var(--text-scale));
   display: flex;
@@ -980,7 +1013,7 @@ button:active {
 }
 
 .btn--mute:hover {
-  background: rgba(230, 140, 40, 0.22);
+  background: rgba(205, 28, 24, 0.22);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -1009,8 +1042,8 @@ button:active {
   width: calc(30px * var(--ui-scale));
   height: calc(30px * var(--ui-scale));
   border-radius: 50%;
-  background: rgba(255, 61, 46, 0.1);
-  border: 1px solid rgba(255, 61, 46, 0.4);
+  background: rgba(148, 0, 211, 0.1);
+  border: 1px solid rgba(148, 0, 211, 0.4);
   color: var(--col-accent);
   font-size: calc(0.85rem * var(--ui-scale) * var(--text-scale));
   display: flex;
@@ -1021,7 +1054,7 @@ button:active {
 
 .btn--close:hover {
   background: var(--col-accent);
-  color: #fff;
+  color: var(--text-highlight);
 }
 
 .howto-content {
@@ -1048,7 +1081,7 @@ button:active {
 .howto-heading {
   font-family: var(--font-display);
   font-size: calc(0.8rem * var(--ui-scale) * var(--text-scale));
-  color: var(--col-primary);
+  color: var(--warm-glow);
   letter-spacing: 2px;
   margin-bottom: var(--space-xs);
 }
@@ -1076,9 +1109,9 @@ button:active {
   display: inline-block;
   font-family: var(--font-display);
   font-size: calc(0.68rem * var(--text-scale));
-  color: var(--col-primary);
-  background: rgba(230, 140, 40, 0.1);
-  border: 1px solid rgba(230, 140, 40, 0.35);
+  color: var(--warm-glow);
+  background: rgba(205, 28, 24, 0.1);
+  border: 1px solid rgba(205, 28, 24, 0.35);
   border-radius: var(--radius-sm);
   padding: 1px 6px;
   margin-right: 2px;
@@ -1101,7 +1134,7 @@ button:active {
 .a11y-value {
   font-family: var(--font-display);
   font-size: calc(0.75rem * var(--text-scale));
-  color: var(--col-primary);
+  color: var(--warm-glow);
   min-width: 3.2em;
   text-align: right;
 }
@@ -1115,17 +1148,18 @@ button:active {
   padding: 6px 4px;
   font-size: calc(0.75rem * var(--text-scale));
   font-family: var(--font-display);
-  border: 1px solid rgba(230, 140, 40, 0.35);
-  background: rgba(230, 140, 40, 0.06);
+  border: 1px solid rgba(205, 28, 24, 0.35);
+  background: rgba(205, 28, 24, 0.06);
   color: var(--col-text-muted);
   border-radius: var(--radius-sm);
   transition: background var(--dur-fast), color var(--dur-fast);
 }
 
 .a11y-option.active {
-  background: var(--col-primary);
-  color: #06121a;
-  border-color: var(--col-primary);
+  /* FIX(theme2): fill + light text instead of dark-on-bright for WCAG AA at this small size */
+  background: var(--primary-deep);
+  color: var(--text-highlight);
+  border-color: var(--primary-deep);
 }
 
 .a11y-row--toggle {
@@ -1150,9 +1184,9 @@ button:active {
   width: calc(72px * var(--ui-scale));
   height: calc(52px * var(--ui-scale));
   border-radius: var(--radius-sm);
-  background: rgba(230, 140, 40, 0.08);
-  border: 1px solid rgba(230, 140, 40, 0.35);
-  color: var(--col-primary);
+  background: rgba(205, 28, 24, 0.08);
+  border: 1px solid rgba(205, 28, 24, 0.35);
+  color: var(--warm-glow);
   font-family: var(--font-display);
   font-size: calc(0.65rem * var(--text-scale));
   letter-spacing: 1px;
@@ -1166,7 +1200,7 @@ button:active {
 }
 
 .btn--weapon:active {
-  background: rgba(230, 140, 40, 0.28);
+  background: rgba(205, 28, 24, 0.28);
 }
 
 .btn--weapon.is-disabled,
@@ -1188,9 +1222,9 @@ button:active {
   width: 84px;
   height: 44px;
   border-radius: var(--radius-sm);
-  background: rgba(230, 140, 40, 0.08);
-  border: 1px solid rgba(230, 140, 40, 0.35);
-  color: var(--col-primary);
+  background: rgba(205, 28, 24, 0.08);
+  border: 1px solid rgba(205, 28, 24, 0.35);
+  color: var(--warm-glow);
   font-family: var(--font-display);
   font-size: calc(0.7rem * var(--text-scale));
   letter-spacing: 1px;
@@ -1209,12 +1243,12 @@ button:active {
 }
 
 .btn--weapon-pc:hover {
-  background: rgba(230, 140, 40, 0.2);
-  box-shadow: var(--glow-primary), 0 0 24px rgba(230, 140, 40, 0.35);
+  background: rgba(205, 28, 24, 0.2);
+  box-shadow: var(--glow-primary), 0 0 24px rgba(205, 28, 24, 0.35);
 }
 
 .btn--weapon-pc:active {
-  background: rgba(230, 140, 40, 0.32);
+  background: rgba(205, 28, 24, 0.32);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -1222,12 +1256,12 @@ button:active {
    ───────────────────────────────────────────────────────────── */
 .run-summary {
   width: min(320px, 90vw);
-  background: rgba(20, 14, 9, 0.88);
-  border: 1px solid rgba(230, 140, 40, 0.28);
+  background: rgba(20, 4, 13, 0.88);
+  border: 1px solid rgba(205, 28, 24, 0.28);
   border-radius: 10px;
   padding: 0.75rem 1rem;
   backdrop-filter: blur(8px);
-  box-shadow: 0 0 20px rgba(230, 140, 40, 0.1);
+  box-shadow: 0 0 20px rgba(205, 28, 24, 0.1);
   margin-bottom: 0.75rem;
 }
 
@@ -1247,7 +1281,7 @@ button:active {
 .run-summary__label {
   font-size: calc(0.78rem * var(--text-scale));
   font-weight: 700;
-  color: rgba(241, 232, 218, 0.5);
+  color: rgba(211, 211, 255, 0.5);
   letter-spacing: 2px;
   text-transform: uppercase;
 }
@@ -1267,8 +1301,8 @@ button:active {
   left: 50%;
   bottom: 48px;
   transform: translate(-50%, 12px);
-  background: rgba(20, 14, 9, 0.92);
-  border: 1px solid rgba(230, 140, 40, 0.35);
+  background: rgba(20, 4, 13, 0.92);
+  border: 1px solid rgba(205, 28, 24, 0.35);
   border-radius: 10px;
   padding: 0.65rem 1.1rem;
   font-family: var(--font-ui);
@@ -1276,7 +1310,7 @@ button:active {
   font-size: calc(0.95rem * var(--text-scale));
   letter-spacing: 0.03em;
   color: #feca57;
-  box-shadow: 0 0 20px rgba(230, 140, 40, 0.12);
+  box-shadow: 0 0 20px rgba(205, 28, 24, 0.12);
   backdrop-filter: blur(8px);
   opacity: 0;
   pointer-events: none;
@@ -1314,7 +1348,7 @@ button:active {
 }
 
 .daily-toggle:has(input:checked) {
-  color: var(--col-primary);
+  color: var(--warm-glow);
 }
 
 .daily-toggle__date {
@@ -1350,11 +1384,13 @@ button:active {
   font-size: calc(0.78rem * var(--ui-scale) * var(--text-scale));
   font-weight: 400;
   letter-spacing: 0.2px;
-  color: rgba(241, 232, 218, 0.55);
+  color: rgba(211, 211, 255, 0.55);
 }
 
 .btn--ascension:hover .upgrade-desc {
-  color: rgba(10, 14, 22, 0.7);   
+  /* FIX(theme2): hover fill is now the dark --primary-deep, not bright orange,
+     so the desc text needs to stay light instead of flipping dark */
+  color: rgba(211, 211, 255, 0.85);
 }
 
 .btn--buildmod {
@@ -1364,16 +1400,16 @@ button:active {
   align-items: flex-start;
   gap: calc(4px * var(--ui-scale));
   text-align: left;
-  border-color: rgba(189, 0, 255, 0.45);
-  box-shadow: 0 0 16px rgba(189, 0, 255, 0.12);
+  border-color: rgba(148, 0, 211, 0.55);
+  box-shadow: 0 0 16px rgba(148, 0, 211, 0.2);
 }
 
 .btn--buildmod .upgrade-title {
-  color: #e0b3ff;
+  color: var(--accent-magenta);
 }
 
 .btn--buildmod:hover .upgrade-desc {
-  color: rgba(10, 14, 22, 0.7);
+  color: rgba(211, 211, 255, 0.85);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -1396,14 +1432,14 @@ button:active {
   width: calc(8px * var(--ui-scale));
   height: calc(8px * var(--ui-scale));
   border-radius: 50%;
-  background: rgba(241, 232, 218, 0.12);
-  border: 1px solid rgba(241, 232, 218, 0.15);
+  background: rgba(211, 211, 255, 0.12);
+  border: 1px solid rgba(211, 211, 255, 0.15);
 }
 
 .daily-pip--played {
   background: var(--col-primary);
   border-color: var(--col-primary);
-  box-shadow: 0 0 6px rgba(230, 140, 40, 0.6);
+  box-shadow: 0 0 6px rgba(205, 28, 24, 0.6);
 }
 
 .daily-streak {
