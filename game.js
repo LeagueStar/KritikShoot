@@ -97,8 +97,8 @@ const CONFIG = Object.freeze({
     rage:         "\u2739",
   },
 
-  HUD_FONT:             "-apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
-  HUD_FONT_DISPLAY:     "-apple-system, 'Segoe UI Semibold', 'Segoe UI', 'Roboto Condensed', 'Arial Narrow', sans-serif",
+  HUD_FONT:             "'Barlow Condensed', -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+  HUD_FONT_DISPLAY:     "'Cinzel', Georgia, 'Times New Roman', serif",
   HUD_COLOR_MAIN:       "#D3D3FF",
   HUD_COLOR_HP_BG:      "rgba(42, 10, 28, 0.55)",
   HUD_COLOR_HP_FG:      "#CD1C18",
@@ -2050,7 +2050,7 @@ class Boss {
     ctx.fillRect(barX, barY, barW * hpR, barH);
 
     ctx.save();
-    ctx.font      = `900 ${Math.max(14, 18 * this.game.uiScale)}px ${CONFIG.HUD_FONT}`;
+    ctx.font      = `900 ${Math.max(14, 18 * this.game.uiScale)}px ${CONFIG.HUD_FONT_DISPLAY}`;
     ctx.fillStyle = "#9400D3";
     ctx.textAlign = "center";
     ctx.shadowColor = "#9400D3";
@@ -2886,12 +2886,6 @@ class UIManager {
     if (existingSummary) existingSummary.remove();
     this._el.gameOverActions.prepend(summaryEl);
 
-    const coinsEl = document.getElementById("gameOverCoins");
-    if (coinsEl) {
-      coinsEl.textContent = `+${coinsEarned} coins earned`;
-      coinsEl.classList.remove("hidden");
-    }
-
     const copyBtn = document.getElementById("copyResultBtn");
     if (g.dailyMode) {
       this._updateDailyResult({
@@ -3051,10 +3045,12 @@ class UIManager {
     const s  = g.uiScale * g.accessibility.textScale;
     const m  = 20 * s;
     const lh = 28 * s;
+    const state = g.fsm.state;
 
     ctx.save();
     ctx.textBaseline = "top";
 
+    if (state !== GameState.GAME_OVER) {
     ctx.font      = `700 ${Math.max(13, 16 * s)}px ${CONFIG.HUD_FONT}`;
     ctx.fillStyle = CONFIG.HUD_COLOR_MAIN;
     const bossLabel = g.boss ? "  ☠ BOSS WAVE" : "";
@@ -3154,14 +3150,13 @@ class UIManager {
       ctx.fillText(`\u26A0 COVER ${coverPct}%`, m, buffY);
       buffY += lh * 0.8;
     }
-
-    const state = g.fsm.state;
+    } // end: state !== GameState.GAME_OVER
 
     if (state === GameState.PAUSED || state === GameState.LEVEL_UP) {
       ctx.fillStyle = "rgba(0,0,0,0.45)";
       ctx.fillRect(0, 0, g.width, g.height);
       ctx.textAlign = "center";
-      ctx.font      = `900 ${Math.max(18, 28 * s)}px ${CONFIG.HUD_FONT}`;
+      ctx.font      = `900 ${Math.max(18, 28 * s)}px ${CONFIG.HUD_FONT_DISPLAY}`;
       ctx.fillStyle = "rgba(148,0,211,0.9)";
       ctx.fillText("⏸ PAUSED", g.width / 2, g.height / 2 - 28 * s);
       ctx.font      = `600 ${Math.max(13, 17 * s)}px ${CONFIG.HUD_FONT}`;
@@ -3187,11 +3182,8 @@ class UIManager {
       ctx.fillRect(0, 0, g.width, g.height);
       ctx.textAlign = "center";
       ctx.fillStyle = "#CD1C18";
-      ctx.font      = `900 ${Math.max(28, 52 * s)}px ${CONFIG.HUD_FONT}`;
-      ctx.fillText("MISSION FAILED", g.width / 2, g.height / 2 - 60 * s);
-      ctx.fillStyle = CONFIG.HUD_COLOR_MAIN;
-      ctx.font      = `600 ${Math.max(15, 22 * s)}px ${CONFIG.HUD_FONT}`;
-      ctx.fillText(`Wave reached: ${g.wave}   Time: ${g.gameTime.toFixed(1)}s`, g.width / 2, g.height / 2 + 10 * s);
+      ctx.font      = `900 ${Math.max(28, 52 * s)}px ${CONFIG.HUD_FONT_DISPLAY}`;
+      ctx.fillText("MISSION FAILED", g.width / 2, g.height * 0.22);
       ctx.textAlign = "left";
     }
 
