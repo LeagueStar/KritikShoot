@@ -43,14 +43,16 @@
   --col-text: var(--text-highlight);
   --col-text-muted: rgba(216, 191, 216, 0.65);
 
-  /* FIX(theme1): Orbitron/Rajdhani were previously pulled from fonts.googleapis.com —
-     a live third-party network call at load time, violating the zero-dependency /
-     pure-client-side requirement. Replaced with a condensed-leaning system-font
-     stack: zero network requests, zero added file size, and -apple-system/Segoe UI
-     Semibold/Roboto Condensed all read as bold, technical "HUD" faces at the
-     weights/letter-spacing already used across the UI (700/900 + wide tracking). */
-  --font-display: -apple-system, "Segoe UI Semibold", "Segoe UI", "Roboto Condensed", "Arial Narrow", sans-serif;
-  --font-ui: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* FIX(theme2-p2): Blood Orchid font pairing, loaded via the Google Fonts
+     <link> in index.html (external font calls are explicitly fine now, see
+     the Part 1 revision notes -- this replaces the old FIX(theme1) system
+     stack). Cinzel is a carved, ritual-feeling serif for the logo, screen
+     titles, and big CTAs; Barlow Condensed is a clean condensed sans that
+     stays legible at small HUD/body sizes and keeps the tight tracking the
+     UI already leans on. Both keep a matching system-font fallback stack
+     for the instant before the webfont finishes loading. */
+  --font-display: "Cinzel", Georgia, "Times New Roman", serif;
+  --font-ui: "Barlow Condensed", -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 
   
   --space-xs: 4px;
@@ -1256,13 +1258,14 @@ button:active {
    ───────────────────────────────────────────────────────────── */
 .run-summary {
   width: min(320px, 90vw);
+  flex-basis: 100%;
   background: rgba(20, 4, 13, 0.88);
   border: 1px solid rgba(205, 28, 24, 0.28);
   border-radius: 10px;
   padding: 0.75rem 1rem;
   backdrop-filter: blur(8px);
   box-shadow: 0 0 20px rgba(205, 28, 24, 0.1);
-  margin-bottom: 0.75rem;
+  margin: 0 auto 0.75rem;
 }
 
 .run-summary__row {
