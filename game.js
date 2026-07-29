@@ -2645,7 +2645,6 @@ class UIManager {
     const restartBtn = document.getElementById("restartBtn");
     if (restartBtn) {
       restartBtn.addEventListener("click", () => {
-        document.getElementById("gameOverCoins")?.classList.add("hidden");
         if (this._shouldShowMobileUI()) attemptLandscapeLock();
         this.game.start();
       });
@@ -2654,7 +2653,6 @@ class UIManager {
     const menuBtn = document.getElementById("menuBtn");
     if (menuBtn) {
       menuBtn.addEventListener("click", () => {
-        document.getElementById("gameOverCoins")?.classList.add("hidden");
         this._renderLeaderboard();
         this._renderCoinShop();
         cancelAnimationFrame(this.game._rafId);
