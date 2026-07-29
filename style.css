@@ -838,6 +838,20 @@ button:active {
   .howto-content {
     max-height: 70vh;
   }
+
+  .game-over-actions {
+    max-height: 92vh;
+    overflow-y: auto;
+    padding: 6px 0;
+  }
+
+  .run-summary {
+    padding: 0.5rem 0.85rem;
+  }
+
+  .run-summary__row {
+    padding: 0.12rem 0;
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -980,15 +994,6 @@ button:active {
 .btn--shop-poor { background: rgba(255,255,255,0.05); color: rgba(211,211,255,0.3); border: 1px solid rgba(255,255,255,0.1); cursor: not-allowed; }
 .btn--shop-maxed { background: rgba(163,181,101,0.12); color: var(--col-success); border: 1px solid rgba(163,181,101,0.35); cursor: default; }
 
-.game-over-coins {
-  font-family: var(--font-ui);
-  font-size: calc(1.1rem * var(--text-scale));
-  font-weight: 700;
-  color: #feca57;
-  text-align: center;
-  margin-bottom: 0.5rem;
-  letter-spacing: 0.04em;
-}
 
 /* ─────────────────────────────────────────────────────────────
    C5. MUTE BUTTON — top-right inside start screen panel
