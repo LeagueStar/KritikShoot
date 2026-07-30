@@ -112,9 +112,9 @@ const CONFIG = Object.freeze({
   PACE_NEW_COLOR:    "#ED80E9",
 
   COLORBLIND_OVERRIDES: {
-    HUD_COLOR_HP_FG:    "#0072B2", // was #2ecc71 green -> safe blue, vs red bg
-    WALL_HP_GOOD_COLOR: "#0072B2", // was #2ecc71 green -> safe blue, vs red bar
-    PACE_AHEAD_COLOR:   "#0072B2", // was #2ecc71 green -> safe blue, vs behind-red
+    HUD_COLOR_HP_FG:    "#0072B2", 
+    WALL_HP_GOOD_COLOR: "#0072B2",
+    PACE_AHEAD_COLOR:   "#0072B2", 
   },
 
   COLORBLIND_ENEMY_COLORS: {
@@ -141,14 +141,6 @@ const ENEMY_TABLE = Object.freeze([
 ]);
 
 // ── ENEMY_TYPES ─────────────────────────────────────────────────
-// FIX(theme2): standard enemies recolored into the --primary/--primary-deep/
-// --warm-glow family (rusher and spread intentionally share --primary-deep --
-// their shapes, triangle vs pentagon, already disambiguate them). "tank" is
-// the roster's elite/toughest unit and gets --accent-violet, matching the
-// boss, so violet reads consistently as "serious threat" across the game.
-// exploder is a 50/50 blend of --primary + --warm-glow (a distinct "volatile"
-// tone) since its shape (square) duplicates "normal"'s and needed its own hue.
-// Colorblind-safe colors (COLORBLIND_ENEMY_COLORS above) are untouched.
 const ENEMY_TYPES = Object.freeze({
   normal: {
     color: "#CD1C18", baseSize: 20, speed: CONFIG.BASE_ENEMY_SPEED,
@@ -1791,10 +1783,8 @@ class Enemy {
       const frac = Math.max(0, this.hp / this.maxHp);
       ctx.save();
       ctx.globalAlpha = 0.85;
-      ctx.fillStyle   = "rgba(42,10,28,0.6)"; // FIX(theme2): track -> --panel-surface
+      ctx.fillStyle   = "rgba(42,10,28,0.6)"; 
       ctx.fillRect(barX, barY, barW, barH);
-      // FIX(theme2): was hsl(120*frac) green->red hue ramp; themed bars stay in the
-      // blood-red family and use brightness instead of hue to read "low health".
       ctx.fillStyle = frac < 0.3 ? "#FFA896" /* --warm-glow: critical flash */ : "#CD1C18" /* --primary */;
       ctx.fillRect(barX, barY, barW * frac, barH);
       ctx.restore();
@@ -2345,9 +2335,6 @@ class UIManager {
   showScreen(state, opts = {}) {
     const el     = this._el;
     const mobile = this._shouldShowMobileUI();
-
-    // FIX(menu1): any state transition closes the leaderboard/upgrades/how-to-play/
-    // accessibility modals so they never linger over — or stack with — the next screen.
     this._closeAllOverlays();
 
     const v = {
@@ -2359,8 +2346,8 @@ class UIManager {
       levelUp:         false,
       ascension:       false,
       mobileActive:    false,
-      mobileDimmed:    false, // PAUSED/LEVEL_UP: dim joystick/fire/weapon, keep them present
-      mobileGameOver:  false, // GAME_OVER: fully remove joystick/fire/weapon, not just dim
+      mobileDimmed:    false, 
+      mobileGameOver:  false, 
     };
 
     switch (state) {
@@ -2525,7 +2512,7 @@ class UIManager {
     });
 
     // ═══════════════════════════════════════════════════════════════════
-    // FIX(menu1): LEADERBOARD / UPGRADES — button-gated modals, same pattern
+    // LEADERBOARD / UPGRADES — button-gated modals, same pattern
     // as the how-to-play / accessibility panels above.
     // ═══════════════════════════════════════════════════════════════════
     const leaderboardBtn   = document.getElementById("leaderboardBtn");
@@ -2801,8 +2788,7 @@ class UIManager {
 
     const chosenBaseId = Object.keys(ASCENSION_TREE).find(id => player.mods[id]);
     const base = ASCENSION_TREE[chosenBaseId];
-    if (!base) return []; // defensive: no tier1 pick recorded, nothing to branch from
-
+    if (!base) return []; 
     if (tier === 1) {
       return base.tier2.map(opt => ({ id: opt.id, label: opt.label, desc: opt.desc }));
     }
@@ -3090,8 +3076,6 @@ class UIManager {
     const hpR = Utils.clamp(p.health / p.maxHealth, 0, 1);
     ctx.fillStyle = CONFIG.HUD_COLOR_HP_BG;
     this._roundRect(ctx, m, hbY, hbW, hbH, 4);
-    // FIX(theme2): low-health warning state — pulse the fill toward --text-highlight
-    // instead of leaving the bar a flat --primary once health gets critical.
     if (hpR > 0 && hpR <= CONFIG.LOW_HEALTH_THRESHOLD && !g.accessibility.colorblindMode) {
       const pulse = 0.5 + 0.5 * Math.sin(g.gameTime * 8);
       ctx.fillStyle = pulse > 0.5 ? "#D3D3FF" : g.getColor("HUD_COLOR_HP_FG");
@@ -3153,6 +3137,9 @@ class UIManager {
     if (state === GameState.PAUSED || state === GameState.LEVEL_UP) {
       ctx.fillStyle = "rgba(0,0,0,0.45)";
       ctx.fillRect(0, 0, g.width, g.height);
+    }
+
+    if (state === GameState.PAUSED) {
       ctx.textAlign = "center";
       ctx.font      = `900 ${Math.max(18, 28 * s)}px ${CONFIG.HUD_FONT_DISPLAY}`;
       ctx.fillStyle = "rgba(148,0,211,0.9)";
@@ -3164,14 +3151,12 @@ class UIManager {
       ctx.fillStyle = "rgba(211,211,255,0.35)";
       ctx.fillText("Q — Quit to Main Menu  |  E / Shift — cycle weapon", g.width / 2, g.height / 2 + 34 * s);
 
-      if (state === GameState.PAUSED) {
-        const ws = g.player?.weaponShots || { default: 0, spread: 0, laser: 0 };
-        const statLine = `Wave ${g.wave} · Kills ${g.kills} · ${g.gameTime.toFixed(1)}s` +
-          ` · GUN:${ws.default} SHOT:${ws.spread} LASER:${ws.laser}`;
-        ctx.font      = `600 ${Math.max(10, 12 * s)}px ${CONFIG.HUD_FONT}`;
-        ctx.fillStyle = "rgba(211,211,255,0.22)";
-        ctx.fillText(statLine, g.width / 2, g.height / 2 + 58 * s);
-      }
+      const ws = g.player?.weaponShots || { default: 0, spread: 0, laser: 0 };
+      const statLine = `Wave ${g.wave} · Kills ${g.kills} · ${g.gameTime.toFixed(1)}s` +
+        ` · GUN:${ws.default} SHOT:${ws.spread} LASER:${ws.laser}`;
+      ctx.font      = `600 ${Math.max(10, 12 * s)}px ${CONFIG.HUD_FONT}`;
+      ctx.fillStyle = "rgba(211,211,255,0.22)";
+      ctx.fillText(statLine, g.width / 2, g.height / 2 + 58 * s);
       ctx.textAlign = "left";
     }
 
@@ -4690,9 +4675,6 @@ class Game {
     try { localStorage.setItem("ks_pace_best", JSON.stringify(this._paceBest)); } catch (e) {  }
   }
 
-  // Refreshed periodically from _update (see _ambientUpdateTimer sibling
-  // below), not computed inside the draw call — keeps the HUD draw path
-  // allocation-free, just reading _paceDeltaState/_paceDeltaSeconds.
   _updatePaceDelta() {
     const best = this._paceBest[this.wave];
     if (best === undefined) { this._paceDeltaState = "none"; this._paceDeltaSeconds = 0; return; }
@@ -4748,17 +4730,11 @@ class Game {
       g.idx++;
     }
     g.tickCounter++;
-    // Ghost is a visual pace reference, not a fully simulated competitor —
-    // it moves at base speed with no collision, so it can't be blocked or
-    // interacted with.
     const speed = CONFIG.PLAYER_BASE_SPEED;
     g.x = Utils.clamp(g.x + g.dx * speed * dt, 20, this.width  - 20);
     g.y = Utils.clamp(g.y + g.dy * speed * dt, 20, this.height - 20);
   }
 
-  // Called at run end (game over or quit) — saves this run's recording as
-  // the new best-local-ghost for today if it outlasted (or matched and beat
-  // on time) the previous best.
   _saveGhostIfBest() {
     if (!this.dailyMode || !this.ghostRecording || this.ghostRecording.samples.length < 4) return;
     const key = `ks_ghost_best_${this.dailySeedDate}`;
