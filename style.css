@@ -4,10 +4,6 @@
 :root {
   --ui-scale: 1;
   --text-scale: 1;
-
-  /* FIX(theme2): "Blood Orchid" palette -- canonical source of truth for every
-     UI color AND every canvas fillStyle/strokeStyle/gradient stop in game.js.
-     Don't hand-pick new hex values anywhere else; derive from these 9. */
   --void-bg:        #14040D;
   --panel-surface:  #2A0A1C;
   --primary:        #CD1C18;
@@ -17,13 +13,6 @@
   --text-highlight: #D3D3FF;
   --text-muted:     #D8BFD8;
   --warm-glow:      #FFA896;
-
-  /* Legacy token names kept as aliases so the rest of this file (and any
-     inline styles injected from game.js) keep working unchanged.
-     --col-primary is the dominant/most-used UI hue (buttons, borders, HUD) ->
-     bright --primary. --col-accent is reserved for urgent/danger actions
-     (shoot, quit, restart) -> --accent-violet, so it pops against the sea
-     of primary red instead of blending in. */
   --col-bg: var(--void-bg);
   --col-bg-mid: #1f0714;
   --col-glass: rgba(42, 10, 28, 0.72);
@@ -42,15 +31,6 @@
   --col-warn: var(--warm-glow);
   --col-text: var(--text-highlight);
   --col-text-muted: rgba(216, 191, 216, 0.65);
-
-  /* FIX(theme2-p2): Blood Orchid font pairing, loaded via the Google Fonts
-     <link> in index.html (external font calls are explicitly fine now, see
-     the Part 1 revision notes -- this replaces the old FIX(theme1) system
-     stack). Cinzel is a carved, ritual-feeling serif for the logo, screen
-     titles, and big CTAs; Barlow Condensed is a clean condensed sans that
-     stays legible at small HUD/body sizes and keeps the tight tracking the
-     UI already leans on. Both keep a matching system-font fallback stack
-     for the instant before the webfont finishes loading. */
   --font-display: "Cinzel", Georgia, "Times New Roman", serif;
   --font-ui: "Barlow Condensed", -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 
@@ -211,8 +191,6 @@ body {
   transform: translate(-50%, -50%) scale(0.9);
 }
 
-/* FIX(theme2): "combat" panels (stats/rankings) border in --primary-deep;
-   "power" panels (upgrades/ascension) border in --accent-violet. */
 #leaderboardScreen {
   border-color: rgba(155, 19, 19, 0.4);
 }
@@ -431,8 +409,6 @@ button:active {
 }
 
 .btn--upgrade:hover {
-  /* FIX(theme2): fill deepens to --primary-deep on hover (per-spec "pressed/hover"
-     token) with light text, instead of dark-on-bright which fails WCAG AA here */
   background: var(--primary-deep);
   color: var(--text-highlight);
   border-color: var(--primary-deep);
@@ -474,8 +450,6 @@ button:active {
   box-shadow: var(--glow-primary), 0 8px 32px rgba(205, 28, 24, 0.3);
 }
 
-/* FIX(menu1): trigger row for the leaderboard/upgrades modals — sits below DEPLOY,
-   never crowds the callsign input since it's a slim secondary row. */
 .menu-utility-row {
   display: flex;
   gap: var(--space-sm);
@@ -577,7 +551,6 @@ button:active {
 .leaderboard th {
   font-family: var(--font-display);
   font-size: calc(0.7rem * var(--ui-scale) * var(--text-scale));
-  /* FIX(theme2): small text -> --warm-glow instead of --col-primary for WCAG AA */
   color: var(--warm-glow);
   letter-spacing: 2px;
   padding-bottom: var(--space-sm);
@@ -1163,7 +1136,6 @@ button:active {
 }
 
 .a11y-option.active {
-  /* FIX(theme2): fill + light text instead of dark-on-bright for WCAG AA at this small size */
   background: var(--primary-deep);
   color: var(--text-highlight);
   border-color: var(--primary-deep);
@@ -1396,8 +1368,6 @@ button:active {
 }
 
 .btn--ascension:hover .upgrade-desc {
-  /* FIX(theme2): hover fill is now the dark --primary-deep, not bright orange,
-     so the desc text needs to stay light instead of flipping dark */
   color: rgba(211, 211, 255, 0.85);
 }
 
