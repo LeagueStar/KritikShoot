@@ -1,183 +1,223 @@
 <div align="center">
 
-# 🩸 KritikShoot
-**Crimson-Void Survival Shooter**
+# 🩸 KRITIKSHOOT
+### *crimson-void survival, no cap*
 
-[![Play Live](https://img.shields.io/badge/Play-Live_Demo-CD1C18?style=for-the-badge&logo=googlechrome&logoColor=white)](https://leaguestar.github.io/KritikShoot/)
+<sub>a top-down arena shooter built from absolute scratch — no engine, no libraries, no image assets, just vanilla JS doing the most</sub>
+
+<br/>
+
+[![Play Live](https://img.shields.io/badge/▶_PLAY_NOW-CD1C18?style=for-the-badge&logo=googlechrome&logoColor=white)](https://leaguestar.github.io/KritikShoot/)
 [![Vanilla JS](https://img.shields.io/badge/Vanilla-JavaScript-f7df1e?style=for-the-badge&logo=javascript&logoColor=black)]()
-[![HTML5 Canvas](https://img.shields.io/badge/HTML5-Canvas-e34f26?style=for-the-badge&logo=html5&logoColor=white)]()
-[![Web Audio API](https://img.shields.io/badge/Web_Audio-Procedural-9400D3?style=for-the-badge&logo=webaudio&logoColor=white)]()
-[![No Dependencies](https://img.shields.io/badge/Dependencies-Zero-CD1C18?style=for-the-badge)]()
-
-*A lightning-fast, highly optimized top-down arena shooter built entirely from scratch — no external libraries, no game engine, no image assets.*
+[![HTML5 Canvas](https://img.shields.io/badge/HTML5-Canvas-9400D3?style=for-the-badge&logo=html5&logoColor=white)]()
+[![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero-14040D?style=for-the-badge)]()
+[![Web Audio](https://img.shields.io/badge/Audio-Procedural-ED80E9?style=for-the-badge)]()
 
 </div>
 
----
+<br/>
 
-## 🌌 Overview
+> **the vibe:** blood-red primaries, electric violet accents, lavender highlights, burning against a near-black void. you fly a delta-wing fighter through relentless neon swarms. every frame is earned, not borrowed.
 
-**KritikShoot** is a high-octane survival game wrapped in a **crimson-and-violet-on-deep-void** aesthetic — blood-red primaries, electric violet accents, and lavender highlights burning against a near-black backdrop. You pilot a sharp, swept-back delta-wing fighter, battling relentless swarms of neon geometric enemies. Built purely on vanilla web technologies, it features dynamic wave generation, deep in-run progression, a persistent meta-economy, daily seeded challenges, and multi-phase boss encounters — all running at a locked, interpolated 60Hz.
+<br/>
 
----
+## ⚡ tl;dr
 
-## 🛠️ Core Engine Architecture & Micro-Optimizations
+| | |
+|---|---|
+| 🎮 **genre** | top-down survival arena shooter |
+| 🧠 **built with** | pure vanilla JS + Canvas + Web Audio API — zero libraries, zero frameworks |
+| 📱 **plays on** | desktop *and* mobile, first-class parity, not bolted-on touch |
+| 🔒 **runs at** | locked, interpolated 60Hz |
+| 💾 **saves** | persistent meta-progression + local leaderboard, no backend required |
+| 🎨 **theme** | "Blood Orchid" — chili-spice reds fused with wisteria-bloom violets |
 
-The engine is built for flawless high-Hz performance using patterns implemented natively in JavaScript — no framework, no engine:
-
-* **Fixed-Timestep Physics + Temporal Interpolation:** An accumulator decouples physics (locked 60Hz) from the render loop. Every entity caches `prevX`/`prevY` and renders via `lerp`, eliminating micro-stutter on 120Hz/144Hz displays.
-* **Swept-Circle CCD Collision:** Fast-moving bullets and entities are resolved with continuous collision detection instead of naive per-frame circle overlap, so nothing tunnels through at high speed.
-* **SpatialHash Broad-Phase:** O(N) collision queries via a spatial hash grid with pooled bucket arrays — zero per-tick GC allocation from the collision system.
-* **GameFSM State Management:** A finite state machine drives menu, playing, paused, level-up, ascension, and game-over transitions, with fault-tolerant save/resume hooked to tab visibility.
-* **GlowCache Pre-Rendering:** Every glow effect is pre-rendered to an offscreen canvas and cached by color/size, eliminating expensive live `shadowBlur` calls entirely.
-* **Adaptive Performance Budgeting:** A rolling frame-time watchdog detects `hardwareConcurrency` and struggling hardware, triggering a one-way `lowPowerMode` that halves particle emission and shrinks glow padding without interrupting gameplay.
-* **Advanced Memory Pooling & Compaction:** Bullets, particles, and floating damage numbers run through custom object pools. Dead-flagged entities are bulk-compacted rather than spliced one-by-one, and trail buffers use a pre-allocated ring buffer with `O(1)` pointer advancement instead of `Array.shift()`.
-* **Batched Rendering Passes:** `ctx.save()` / `restore()` calls are grouped by category to minimize draw-call overhead.
+<br/>
 
 ---
 
-## 📱 Full Mobile Parity
+## 🌌 overview
 
-KritikShoot isn't a desktop game with touch bolted on — mobile is a first-class target:
+**KritikShoot** is a high-octane survival shooter where you pilot a sharp, swept-back delta-wing fighter against escalating waves of neon geometric enemies. Dynamic wave generation, deep in-run progression, a persistent meta-economy, daily seeded challenges, and multi-phase boss fights — all engineered natively, no shortcuts.
 
-* **Device-Aware Rendering:** Detects mobile/low-power hardware and renders to an internally downscaled target with nearest-neighbor blit, keeping frame times smooth without a blurry upscale look.
-* **Orientation Lock & Rotate Prompt:** Locks to landscape where supported and shows a rotate prompt if the device is held in portrait.
-* **Dynamic Virtual Joystick:** Left-side touch joystick with dead-zone filtering to ignore micro-jitter; right-side drag for aim, with manual touch prioritized over auto-aim fallback.
-* **Reduced Particle Budgets & Auto-Aim:** Mobile profiles trim particle counts and offer auto-aim assistance to keep input friendly on a touchscreen.
-* **Haptics:** Boss kills, explosions, and heavy hits fire `navigator.vibrate` pulses for tactile feedback.
+<br/>
 
----
+## 🛠️ core engine & micro-optimizations
 
-## 🎮 Gameplay Systems
+built for flawless high-Hz performance, entirely hand-rolled:
 
-### Dynamic Wave Budgeting & Daily Challenges
-Enemies are spawned via a **Threat Budget System** that scales with `Math.min(60, 8 + wave * 3)`, purchasing enemies from an unlocked bestiary until the budget is spent — a smooth, escalating difficulty curve instead of flat random spawns.
+- **Fixed-Timestep Physics + Temporal Interpolation** — an accumulator decouples physics (locked 60Hz) from the render loop; every entity caches `prevX`/`prevY` and renders via `lerp`, eliminating stutter on 120Hz/144Hz displays
+- **Swept-Circle CCD Collision** — fast bullets and entities resolve with continuous collision detection so nothing tunnels through at speed
+- **SpatialHash Broad-Phase** — O(N) collision queries via a spatial hash grid with pooled bucket arrays, zero per-tick GC allocation
+- **GameFSM State Management** — a finite state machine drives menu, playing, paused, level-up, ascension, and game-over transitions, with fault-tolerant save/resume hooked to tab visibility
+- **GlowCache Pre-Rendering** — every glow effect is pre-rendered to an offscreen canvas and cached by color/size, killing live `shadowBlur` calls
+- **Adaptive Performance Budgeting** — a rolling frame-time watchdog detects `hardwareConcurrency` and struggling hardware, triggering a one-way `lowPowerMode` that trims particles and glow without interrupting play
+- **Advanced Memory Pooling & Compaction** — bullets, particles, and floating damage numbers run through custom object pools; dead entities are bulk-compacted, trail buffers use a pre-allocated ring buffer instead of `Array.shift()`
+- **Batched Rendering Passes** — `ctx.save()`/`restore()` grouped by category to cut draw-call overhead
 
-* **Daily Challenge Mode:** A seeded run driven by a `Mulberry32` PRNG, keyed to the current UTC date. Includes a rolling daily-history strip and a Wordle-style "Copy Result" clipboard export.
+<br/>
 
-### Environment, Cover & Hazards
-* **Line-of-Sight AI:** Ranged enemies and bosses use Liang–Barsky parametric clipping raycasts to check cover before engaging.
-* **Environmental Destruction:** From wave 13 onward, the arena targets central cover blocks for destruction on a rolling cadence, with a pulsing HUD warning once cover drops below 30%.
-* **Corruption Zones:** From wave 10 onward, defeated bosses leave a spreading, persistent damage-over-time zone that damages both player and enemies alike.
+## 📱 full mobile parity
 
-### End-of-Run Sequence
-Dying triggers a full multi-stage cinematic: a staged death animation, a physics-driven debris burst, and an animated stats card with count-up scoring, medal tiers, and personal-best detection — backed by a composite score formula that weights combo streaks and kill chains.
+not a desktop game with touch duct-taped on — mobile is a first-class citizen:
 
----
+- **device-aware rendering** — downscaled target with nearest-neighbor blit for smooth frame times without a blurry upscale
+- **orientation lock + rotate prompt** — locks landscape where supported, prompts if held in portrait
+- **dynamic virtual joystick** — left-side movement with dead-zone filtering; right-side drag-to-aim, manual touch prioritized over auto-aim fallback
+- **reduced particle budgets + auto-aim** — mobile profiles trim particle counts and offer assist for touchscreen play
+- **haptics** — boss kills, explosions, and heavy hits fire `navigator.vibrate` pulses
 
-## ⚔️ Arsenal & Progression
+<br/>
 
-### Weapons (Cycle with `E` / `Shift`)
-1. **Default Gun:** High fire-rate, reliable single-target damage.
-2. **Shotgun (Spread):** A dense 6-pellet burst in a 40° cone, DPS-balanced against the laser at mid-range.
-3. **Piercing Laser:** A high-velocity cyan bolt that punches through up to 4 enemies before dissipating.
+## 🎮 gameplay systems
 
-### In-Run Leveling
-Defeating enemies grants XP. Leveling up pauses the game and offers a stackable upgrade:
+### dynamic wave budgeting & daily challenges
+enemies spawn via a **Threat Budget System** scaling with `Math.min(60, 8 + wave * 3)`, buying enemies from an unlocked bestiary until budget's spent — a smooth escalating curve instead of flat random spawns.
 
-⚡ Move Speed · ❤ Max Health · 💥 Damage · 🔥 Fire Rate · 🚀 Bullet Speed · 🎯 Crit Chance · 🩸 Lifesteal
+- **Daily Challenge Mode** — a seeded run via a `Mulberry32` PRNG keyed to the current UTC date, with a rolling daily-history strip and a Wordle-style "Copy Result" clipboard export
 
-* **Weapon Synergies:** Stack crit chance high enough on the laser to unlock *Piercing Overload*, or lifesteal high enough during a rage buff to trigger *Vampiric Rage*.
-* **Ascension Mods (milestone levels):** Weapon-specific augments — *Ricochet Rounds*, *Detonator Pellets*, *Beam Split*, and more — chosen from a dedicated ascension screen.
+### environment, cover & hazards
+- **line-of-sight AI** — ranged enemies and bosses use Liang–Barsky parametric clipping raycasts to check cover before engaging
+- **environmental destruction** — from wave 13 on, the arena targets central cover blocks on a rolling cadence, with a pulsing HUD warning under 30% cover
+- **corruption zones** — from wave 10 on, defeated bosses leave a spreading, persistent damage-over-time zone that hits player and enemies alike
 
-### 🪙 Persistent Meta-Progression (Local Storage)
-Coins earned from wave completion and survival time carry over between runs and unlock permanent upgrades in the **Upgrade Depot**:
+### end-of-run sequence
+dying triggers a full cinematic: staged death animation → physics-driven debris burst → animated stats card with count-up scoring, medal tiers, and personal-best detection, backed by a composite score formula weighting combo streaks and kill chains.
 
-⚡ Fire Rate · ❤ Max HP · 💥 Damage · 🏃 Move Speed · 🚀 Bullet Speed · 🛡 Starting Ward · 🧲 Magnetism · 🔫 Loadout Swap
+<br/>
 
----
+## ⚔️ arsenal & progression
 
-## 👾 Enemy Bestiary
+### weapons — cycle with `E` / `Shift`
+1. **Default Gun** — high fire-rate, reliable single-target damage
+2. **Shotgun (Spread)** — dense 6-pellet burst in a 40° cone, DPS-balanced against the laser at mid-range
+3. **Piercing Laser** — high-velocity cyan bolt punching through up to 4 enemies
 
-| Type | Aesthetic | Behavior |
-| :--- | :--- | :--- |
-| **Normal** | 🟢 Green Square | Standard rusher, balanced HP and speed. |
-| **Rusher** | 🔴 Red Triangle | Fragile but incredibly fast; proximity-based melee. |
-| **Fast** | 🟡 Yellow Triangle | Agile hit-and-run flanker. |
-| **Ranged** | 🌐 Cyan Octagon | Holds distance, uses LoS raycasting, orbital strafing. |
-| **Spread** | 🟣 Purple Pentagon | Fires a deadly 3-way bullet spread. |
-| **Exploder** | 🟠 Orange Square | Detonates on proximity — massive AoE and screen shake. |
-| **Tank** | 🔵 Blue Hexagon | Slow behemoth with 250% base HP and heavy melee. |
+### in-run leveling
+kills grant XP. leveling up pauses the game for a stackable upgrade:
 
-### ☠️ Boss Encounters
-Every 5th wave halts standard spawning for a three-phase boss fight:
+`⚡ Move Speed` `❤ Max Health` `💥 Damage` `🔥 Fire Rate` `🚀 Bullet Speed` `🎯 Crit Chance` `🩸 Lifesteal`
 
-* **Phase 1 — Radial Hell:** Expanding, interleaved rings of bullets.
-* **Phase 2 — Rest & Volley:** Tracks the player with a targeted 3-round burst.
-* **Phase 3 — Charge Dash:** Telegraphed flash, then a hyper-speed dash to the player's last known position.
+- **weapon synergies** — stack crit high enough on the laser for *Piercing Overload*, or lifesteal high enough during a rage buff for *Vampiric Rage*
+- **ascension mods** (milestone levels) — weapon-specific augments like *Ricochet Rounds*, *Detonator Pellets*, *Beam Split*, chosen from a dedicated ascension screen
 
----
+### 🪙 persistent meta-progression
+coins earned from wave completion and survival time carry over between runs, spendable in the **Upgrade Depot**:
 
-## 🎵 Procedural Audio & Haptics
+`⚡ Fire Rate` `❤ Max HP` `💥 Damage` `🏃 Move Speed` `🚀 Bullet Speed` `🛡 Starting Ward` `🧲 Magnetism` `🔫 Loadout Swap`
 
-**Zero audio files.** All sound is synthesized live via the Web Audio API (`OscillatorNode`, `BiquadFilterNode`, `GainNode`):
+<br/>
 
-* **Dynamic Ambient Bed:** Detuned drones with a slow breathing LFO that scales with wave progress and enemy density.
-* **SFX Jitter:** Randomized frequency sweeps on hit/shoot SFX to avoid auditory fatigue.
-* **Hit-Stop:** Boss deaths and heavy explosions briefly freeze the physics accumulator and thud the camera, paired with mobile vibration.
+## 👾 enemy bestiary
 
----
+| type | look | behavior |
+|---|---|---|
+| **Normal** | 🟢 green square | standard rusher, balanced HP/speed |
+| **Rusher** | 🔴 red triangle | fragile, incredibly fast, proximity melee |
+| **Fast** | 🟡 yellow triangle | agile hit-and-run flanker |
+| **Ranged** | 🌐 cyan octagon | holds distance, LoS raycasting, orbital strafing |
+| **Spread** | 🟣 purple pentagon | fires a deadly 3-way bullet spread |
+| **Exploder** | 🟠 orange square | detonates on proximity, massive AoE + screen shake |
+| **Tank** | 🔵 blue hexagon | slow behemoth, 250% base HP, heavy melee |
 
-## ⌨️ Controls
+### ☠️ boss encounters
+every 5th wave halts standard spawning for a three-phase fight:
 
-### Desktop
-| Action | Key |
-| :--- | :--- |
-| Move | `W` `A` `S` `D` |
-| Aim | `Mouse` or `Arrow Keys` (arrows override mouse while held) |
-| Fire | `Left Click` or `Space` |
-| Switch Weapon | `E` or `Shift` |
-| Pause | `Esc` |
-| Quit to Menu | `Q` (while paused) |
+1. **Radial Hell** — expanding, interleaved bullet rings
+2. **Rest & Volley** — tracks the player with a targeted 3-round burst
+3. **Charge Dash** — telegraphed flash, then a hyper-speed dash to the player's last known position
 
-### Mobile
-| Action | Control |
-| :--- | :--- |
-| Move | Left-side virtual joystick |
-| Aim | Right-side touch & drag |
-| Fire | `FIRE` button (or auto-fire while moving) |
-| Switch Weapon | Weapon button |
-| Pause | `⏸` |
-| Quit to Menu | `⌂` (while paused) |
+<br/>
 
----
+## 🎵 procedural audio & haptics
 
-## 🎨 Design System & Accessibility
+**zero audio files.** everything's synthesized live via the Web Audio API (`OscillatorNode`, `BiquadFilterNode`, `GainNode`):
 
-**Palette — Crimson & Violet on Deep Void**
+- **dynamic ambient bed** — detuned drones with a slow breathing LFO scaling with wave progress and enemy density
+- **SFX jitter** — randomized frequency sweeps on hit/shoot SFX to dodge auditory fatigue
+- **hit-stop** — boss deaths and heavy explosions briefly freeze the physics accumulator and thud the camera, paired with mobile vibration
 
-| Token | Swatch | Hex |
-| :--- | :--- | :--- |
-| Void Background | ⬛ | `#14040D` |
-| Panel Surface | 🟪 | `#2A0A1C` |
-| Primary (Crimson) | 🟥 | `#CD1C18` |
-| Primary Deep | 🟥 | `#9B1313` |
-| Accent Violet | 🟣 | `#9400D3` |
-| Accent Magenta | 🩷 | `#ED80E9` |
-| Text Highlight | ⬜ | `#D3D3FF` |
-| Warm Glow | 🟧 | `#FFA896` |
+<br/>
 
-The primary crimson runs low-contrast on the void background by design, so interactive labels default to white/highlight text rather than color-on-color for readability.
+## 🖥️ main menu
 
-**Accessibility Settings (dedicated in-game panel):**
-* 🎚 **Screen Shake Intensity** — adjustable slider, independent of reduced-motion.
-* 🔠 **HUD Text Scale** — Normal / Large / X-Large.
-* ▲ **Shape-Only Enemy ID** — thicker, high-contrast outlines so enemy type reads from silhouette, not just color.
-* 🎨 **Colorblind-Safe Palette** — deuteranopia/protanopia-safe remap for enemies and health bars.
-* **Reduced Motion Compliance** — hooks `prefers-reduced-motion` to automatically dampen shake, particles, and hit-stop flashes.
+the menu keeps things clean — everything non-essential lives behind its own modal, launched from a dedicated button:
 
-**Other UI touches:**
-* Glassmorphism overlays with `backdrop-filter: blur` and glowing borders throughout menus and the shop.
-* Colorblind-friendly powerup glyphs (✚ Health, ✦ XP, ◈ Shield) layered over neon glows, independent of color.
-* Responsive docking — floating panels like the Coin Shop reparent into normal document flow on small/landscape viewports.
-* Zero-cost dev HUD — backtick (`` ` ``) toggles a frametime/entity-count overlay, fully stripped from the loop when off.
+| button | opens |
+|---|---|
+| 🏆 | **Leaderboard** — local high scores |
+| 🛠 | **Upgrades** — the persistent Upgrade Depot |
+| ❓ | **How to Play** — objective, controls, weapons, upgrades |
+| ⚙ | **Accessibility** — shake intensity, text scale, shape ID, colorblind palette |
+| 🔊 | mute toggle |
+
+plus a callsign field, **DEPLOY** button, and a **Daily Challenge** toggle with today's date and a rolling history strip of past results.
+
+<br/>
+
+## ⌨️ controls
+
+### desktop
+| action | key |
+|---|---|
+| move | `W` `A` `S` `D` |
+| aim | `mouse` or `arrow keys` *(arrows override mouse while held)* |
+| fire | `left click` or `space` |
+| switch weapon | `E` or `Shift` |
+| pause | `Esc` |
+| quit to menu | `Q` *(while paused)* |
+
+### mobile
+| action | control |
+|---|---|
+| move | left-side virtual joystick |
+| aim | right-side touch & drag |
+| fire | `FIRE` button *(or auto-fire while moving)* |
+| switch weapon | weapon button |
+| pause | `⏸` |
+| quit to menu | `⌂` *(while paused)* |
+
+<br/>
+
+## 🎨 design system — "blood orchid"
+
+chili-spice reds fused with wisteria-bloom violets, applied across DOM *and* canvas rendering — not just the menu.
+
+| token | swatch | hex |
+|---|---|---|
+| void background | ⬛ | `#14040D` |
+| panel surface | 🟪 | `#2A0A1C` |
+| primary crimson | 🟥 | `#CD1C18` |
+| primary deep | 🟥 | `#9B1313` |
+| accent violet | 🟣 | `#9400D3` |
+| accent magenta | 🩷 | `#ED80E9` |
+| text highlight | ⬜ | `#D3D3FF` |
+| warm glow | 🟧 | `#FFA896` |
+
+> primary crimson runs low-contrast against the void by design — interactive labels default to white/highlight text instead of color-on-color, so nothing gets lost.
+
+**accessibility, built in, not bolted on:**
+
+- 🎚 **screen shake intensity** — adjustable slider, independent of reduced-motion
+- 🔠 **HUD text scale** — Normal / Large / X-Large
+- ▲ **shape-only enemy ID** — thicker high-contrast outlines so enemy type reads from silhouette alone
+- 🎨 **colorblind-safe palette** — deuteranopia/protanopia-safe remap for enemies and health bars
+- **reduced motion compliance** — hooks `prefers-reduced-motion` to auto-dampen shake, particles, and hit-stop flashes
+
+**other UI touches:**
+- glassmorphism overlays — `backdrop-filter: blur` + glowing borders across every modal
+- colorblind-friendly powerup glyphs (`✚` health, `✦` XP, `◈` shield), independent of color
+- responsive docking — floating panels reparent into normal flow on small/landscape viewports
+- zero-cost dev HUD — backtick (`` ` ``) toggles a frametime/entity-count overlay, fully stripped from the loop when off
+
+<br/>
 
 ---
 
 <div align="center">
 
-## Built with 🩸 by **LeagueStar**
+### built with 🩸 by **LeagueStar**
 
-**Happy Shooting! 🚀**
+**happy shooting 🚀**
 
 </div>
